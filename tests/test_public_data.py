@@ -40,11 +40,16 @@ class PublicDataTests(unittest.TestCase):
             self.assertEqual(settings()['registry_key'], 'a+b/c=')
 
     def test_pnu_uses_current_cadastral_parcel(self):
-        p = PublicBuildings(CONFIG, request=lambda endpoint, params: {'response': {'status':'OK',
+        calls=[]
+        def request(endpoint, params):
+            calls.append(params)
+            return {'response': {'status':'OK',
             'result': {'featureCollection': {'features': [{'geometry':feature('old')['geometry'],
-                'properties': {'pnu':'1111010100101230004'}}]}}}})
+                'properties': {'pnu':'1111010100101230004'}}]}}}}
+        p = PublicBuildings(CONFIG, request=request)
         from shapely.geometry import shape
         current, _ = p.parcel(shape(feature('old')['geometry']))
+        self.assertEqual(calls[0]['buffer'],1)
         self.assertEqual(pnu_parameters(current), {'sigunguCd':'11110', 'bjdongCd':'10100', 'platGbCd':'0', 'bun':'0123', 'ji':'0004'})
 
     def test_partial_geometry_has_no_solar_data_and_estimates_are_explicit(self):

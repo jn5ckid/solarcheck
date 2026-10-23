@@ -187,7 +187,8 @@ class PublicBuildings:
     def parcel(self, polygon):
         # bd_mgt_sn's first 19 digits reflect the PNU when created, NOT necessarily today's parcel.
         point = polygon.representative_point()
-        features, _ = self.features('LP_PA_CBND_BUBUN', point.x, point.y)
+        # A zero-width point query can return NOT_FOUND; use 1m then test exact containment.
+        features, _ = self.features('LP_PA_CBND_BUBUN', point.x, point.y, 1)
         matches = []
         for feature in features:
             try:

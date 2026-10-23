@@ -491,6 +491,7 @@ addEventListener('beforeprint', () => document.querySelectorAll('details').forEa
       catch (err) { $('#building-search-note').textContent = err.message; }
     });
     await loadSite(index[0].site_id);
+    $('#lookup-submit').disabled = false;
     show('site');
   } catch (err) {
     $('main').innerHTML = `<h1>데이터를 불러오지 못했어요</h1><p class="hint">${esc(err.message)}. 로컬에서는 docs 폴더에서 python -m http.server 로 띄워 주세요.</p>`;

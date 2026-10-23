@@ -32,7 +32,7 @@ python prep/gis_to_site.py raw/buildings.gpkg --lon 128.53 --lat 35.84 --site-id
 python prep/build_site.py prep/sites/demo_seoul.json --epw <서울 EPW 경로>
 
 # 3) 로컬 확인 (file:// 로 열면 JSON을 못 읽음)
-cd docs && python -m http.server 8000      # 휴대폰은 같은 와이파이에서 http://<노트북 IP>:8000
+cd docs && python -m http.server 5500      # 휴대폰은 같은 와이파이에서 http://<노트북 IP>:5500
 
 # 4) 산정 테스트
 node --test tests/calc.test.mjs

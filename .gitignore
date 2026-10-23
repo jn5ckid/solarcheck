@@ -8,8 +8,8 @@ __pycache__/
 *.py[cod]
 .env.*
 !.env.example
-models/
-data/
-uploads/
-outputs/
-tools/
+/models/
+/data/
+/uploads/
+/outputs/
+/tools/

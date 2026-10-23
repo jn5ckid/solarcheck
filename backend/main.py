@@ -4,6 +4,7 @@ from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from .public_data import PublicBuildings, LookupFailure, settings
+from .surrogate import status as surrogate_status
 
 app = FastAPI(title="SolarCheck 연결 시험")
 
@@ -20,7 +21,7 @@ app.add_middleware(
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "address-lookup-1"}
+    return {"status": "ok", "version": "surrogate-readiness-1"}
 
 
 class BuildingLookup(BaseModel):
@@ -35,6 +36,24 @@ def public_config():
     config = settings()
     return {'vworld_ready': bool(config['vworld_key']), 'registry_ready': bool(config['registry_key']),
             'floor_height_assumption_m': config['floor_height'], 'radius_max_m': 300}
+
+
+@app.get('/api/irradiance/status')
+def irradiance_status():
+    # Only readiness and public limitations: never local paths or credentials.
+    return surrogate_status()
+
+
+@app.post('/api/irradiance/analyze')
+def analyze_irradiance(query: BuildingLookup):
+    # The research-coordinate predictor is callable from Python, but this route
+    # cannot convert addresses before geographic registration is established.
+    model = surrogate_status()
+    raise HTTPException(status_code=409, detail={
+        'code': 'ADDRESS_MODEL_NOT_READY',
+        'message': '실제 주소와 연구 모델 좌표의 정합을 확인하기 전에는 일사량을 계산하지 않아요.',
+        'blockers': model['blockers'], 'research_inference_ready': model['research_inference_ready'],
+    })
 
 
 @app.post('/api/buildings/lookup')

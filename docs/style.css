@@ -135,3 +135,5 @@ details ul { padding-left: 18px; color: var(--muted); }
 @media (prefers-reduced-motion: no-preference) {
   .pb-bar { transition: width .5s ease-out; }
 }
+#irradiance-canvas { display: block; width: 100%; max-width: 720px; cursor: crosshair; margin: 1rem 0; }
+#irradiance-cell-value { display: block; min-height: 2em; }

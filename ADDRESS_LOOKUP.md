@@ -35,6 +35,7 @@ Python 코드를 바꿨다면 기존 서버 터미널에서 Ctrl+C 후 다시 �
 - 지상층수 0은 높이 추정에 쓰지 않습니다. 높이와 유효 층수가 모두 없으면 3D 입면을 만들지 않습니다. 주변 건물도 높이가 없으면 목록에만 표시합니다.
 - 형상은 단순 블록 모델이며, 복합 폴리곤은 가장 큰 부분을 사용합니다. 내부 중정 벽, 지붕 세부 모양, 발코니, 수목은 모델링하지 않습니다.
 - 실제 건물의 일사량·발전량·회수기간은 아직 분석 서버와 연결하지 않았습니다. 실제 주소 조회 후에는 결과 버튼이 비활성화됩니다. 데모 예제를 선택할 때만 기존 데모 계산을 볼 수 있습니다.
+- E2c의 원래 연구 좌표 추론은 검증했지만, 주소 좌표와 연구 XYZ의 지리 정합이 없어 실제 주소 추론은 HTTP 409로 차단합니다. **일사량 모델 상태 확인**에서 자료 준비 여부와 부족한 조건을 확인할 수 있습니다. 상세 계약은 [SURROGATE_INTEGRATION.md](SURROGATE_INTEGRATION.md)에 있습니다.
 - 공개 API 요청은 메모리에 5분간, 최대 128건 캐시합니다. 주소 조회 데이터와 키를 별도 파일로 기록하지 않습니다. 인증키가 포함된 외부 요청 URL을 오류 응답에 넣지 않습니다.
 
 공식 문서: [브이월드 주소 좌표 변환](https://www.vworld.kr/dev/v4dv_geocoderguide2_s001.do), [도로명주소 건물](https://www.vworld.kr/dev/v4dv_2ddataguide2_s002.do?svcIde=spbd&apiVer=2), [건축HUB 건축물대장정보 서비스](https://www.data.go.kr/data/15134735/openapi.do).
@@ -47,3 +48,5 @@ node --test tests/*.test.mjs
 ```
 
 `GET /api/config`는 키 설정 여부만 반환합니다. `POST /api/buildings/lookup`에는 `address`, `radius_m`, 필요 시 `building_id`, `record_id`를 전달합니다. `status`는 `ok`, `select_building`, `select_record` 중 하나이며, 실패는 안전한 오류 코드·메시지와 HTTP 상태를 반환합니다.
+
+실제 인증 결과는 `.\.venv\Scripts\python.exe -m prep.check_public_services`로 별도 확인합니다. 키·요청 URL·상위 응답 전문을 출력하지 않습니다. `geometry_frame`에는 AEQD 투영·중심 이동량과 높이 기준 미정 상태를 포함하며, 이를 학습 좌표와 동일하다고 간주하지 않습니다.

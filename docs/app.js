@@ -1,4 +1,4 @@
-import { evaluate, faceName } from './calc.js';
+import { evaluate, faceName, openingRatio } from './calc.js?v=20261023-surrogate';
 import { FacadeViewer } from './facade-viewer.js';
 import { validateCorners } from './facade-geometry.js';
 import { loadFacades, saveFacade, removeFacade } from './facade-store.js';
@@ -32,7 +32,7 @@ function show(step) {
 // 일사량 색: 음영(회청) → 햇빛(노랑) → 강한 일사(주황)
 const RAMP = [[96, 112, 120], [150, 160, 150], [242, 179, 0], [232, 110, 30]];
 function color(v, lo, hi) {
-  const t = Math.min(1, Math.max(0, (v - lo) / (hi - lo))) * (RAMP.length - 1);
+  const t = Math.min(1, Math.max(0, (v - lo) / (hi - lo || 1))) * (RAMP.length - 1);
   const i = Math.min(RAMP.length - 2, Math.floor(t)), w = t - i;
   return `rgb(${RAMP[i].map((c, k) => Math.round(c + (RAMP[i + 1][k] - c) * w))})`;
 }
@@ -58,7 +58,7 @@ async function displaySite(site, irr, version = ++siteLoadVersion) {
   S.face = null; S.cellsFrac = {}; S.textures = {};
   viewer.setSite(site); viewer.setContext($('#model-context').checked);
   const b = S.site.building;
-  $('#loaded-building-name').textContent = `${irr ? '[가상 데모] ' : ''}${site.name} · ${site.address}`;
+  $('#loaded-building-name').textContent = `${site.source === 'public_api' ? '' : '[가상 데모] '}${site.name} · ${site.address}`;
   const heightNote = b.height_source === 'floor_estimate' ? ' (층수로 추정)' : '';
   const text = v => esc(v ?? '확인 필요');
   $('#site-info').innerHTML = `
@@ -105,6 +105,7 @@ async function displaySite(site, irr, version = ++siteLoadVersion) {
       : '입면을 고르고 사진의 네 모서리를 지정하면 해당 벽면에 입혀요. 사진은 이 기기에 저장돼요.';
   if (irr) $('#go-result').textContent = count ? '데모 진단 결과 보기' : '사진 없이 데모 결과 보기';
   if (!site.faces.length) $('#facade-status').textContent = '높이가 없어 사진을 붙일 입면을 만들지 못했어요. 건물의 높이 또는 지상층수 확인이 필요해요.';
+  drawIrradianceGrid();
 }
 
 function drawFaceList() {
@@ -121,7 +122,37 @@ function drawFaceList() {
       <span class="val">${v === null ? '<span class="sub">일사 분석 전</span>' : `${fmt(v)}<span class="sub">kWh/㎡·년</span>`}</span></button></li>`;
   }).join('');
   $('#face-list').querySelectorAll('button:not(:disabled)').forEach(b => b.addEventListener('click', () => pickFace(b.dataset.face)));
+  drawIrradianceGrid();
 }
+
+function drawIrradianceGrid() {
+  const f = S.site?.faces.find(f => f.face_id === S.face), data = S.irr?.faces[f?.face_id];
+  const box = $('#irradiance-grid');
+  box.hidden = !data || !f?.ns || !f?.nt;
+  if (box.hidden) return;
+  const cv = $('#irradiance-canvas'), g = cv.getContext('2d'), [lo, hi] = range();
+  cv.width = 720; cv.height = Math.max(160, Math.min(620, 720 * f.height_m / f.width_m));
+  const cw = cv.width / f.ns, ch = cv.height / f.nt;
+  const fractions = S.cellsFrac[f.face_id];
+  $('#irradiance-grid-title').textContent = `${S.site.source === 'public_api' ? '' : '[가상 데모] '}${labelFace(f)} · 격자별 연간 일사량`;
+  $('#irradiance-grid-note').textContent = `${fmt(lo)} ~ ${fmt(hi)} kWh/㎡·년 · 칸을 누르면 수치가 나와요. 사선은 사진에서 제외한 칸이에요. ${S.irr.weather}`;
+  for (let t = 0; t < f.nt; t++) for (let s = 0; s < f.ns; s++) {
+    const i = t * f.ns + s, x = s * cw, y = (f.nt - 1 - t) * ch;
+    g.fillStyle = color(data.annual[i], lo, hi); g.fillRect(x, y, cw, ch);
+    g.strokeStyle = '#ffffffaa'; g.lineWidth = .8; g.strokeRect(x, y, cw, ch);
+    if (fractions?.[i] < 1) {
+      g.strokeStyle = '#18302a'; g.beginPath(); g.moveTo(x, y + ch); g.lineTo(x + cw, y); g.stroke();
+    }
+  }
+  $('#irradiance-cell-value').textContent = '왼쪽부터 열 번호, 아래쪽부터 행 번호로 표시해요.';
+}
+$('#irradiance-canvas').addEventListener('click', e => {
+  const f = face(), cv = e.currentTarget, rect = cv.getBoundingClientRect();
+  const s = Math.min(f.ns - 1, Math.max(0, Math.floor((e.clientX - rect.left) / rect.width * f.ns)));
+  const t = f.nt - 1 - Math.min(f.nt - 1, Math.max(0, Math.floor((e.clientY - rect.top) / rect.height * f.nt)));
+  const i = t * f.ns + s, fraction = S.cellsFrac[f.face_id]?.[i] ?? 1 - openingRatio(S.cellsFrac, S.params);
+  $('#irradiance-cell-value').textContent = `${s + 1}열 ${t + 1}행 · ${fmt(S.irr.faces[f.face_id].annual[i], 1)} kWh/㎡·년 · 설치 가능 비율 ${fmt(fraction * 100)}%${S.cellsFrac[f.face_id] ? ' (사진 편집)' : ' (개구율 가정)'}`;
+});
 
 function pickFace(id) {
   S.face = id;
@@ -172,10 +203,28 @@ async function checkServer() {
     if (!r.ok) throw new Error('서버의 주소 조회 기능을 확인하지 못했어요. Python 서버를 다시 시작해 주세요.');
     const c = await r.json();
     $('#api-status').textContent = `연구실 PC 연결됨 · 브이월드 ${c.vworld_ready ? '키 설정됨' : '키 필요'} · 건축HUB ${c.registry_ready ? '키 설정됨' : '키 필요 (사용승인일·용도·면적)'}`;
+    await checkSurrogate();
   } catch (e) { $('#api-status').textContent = e instanceof TypeError ? '서버에 연결하지 못했어요. PC 서버와 터널이 실행 중인지 확인해 주세요.' : e.message; }
 }
 $('#api-check').addEventListener('click', checkServer);
 $('#api-url').addEventListener('change', () => { lookupAbort?.abort(); ++lookupVersion; checkServer(); });
+
+let modelStatusVersion = 0;
+async function checkSurrogate() {
+  const version = ++modelStatusVersion;
+  $('#surrogate-status').textContent = '일사량 모델 준비 상태를 확인하고 있어요…';
+  try {
+    const origin = serverUrl();
+    const r = await fetch(`${origin}/api/irradiance/status`, {signal: AbortSignal.timeout(12000)});
+    if (!r.ok) throw new Error('모델 상태를 확인하지 못했어요. 서버 업데이트·실행 상태를 확인해 주세요.');
+    const data = await r.json();
+    if (version !== modelStatusVersion || origin !== serverUrl()) return;
+    $('#surrogate-status').textContent = `${data.research_inference_ready ? '연구용 시간별 모델 준비됨' : '연구 모델 자료·실행 환경 확인 필요'} · 실제 주소 분석 보류. ${(data.blockers ?? []).map(b => b.message).join(' ')}`;
+  } catch (e) {
+    if (version === modelStatusVersion) $('#surrogate-status').textContent = `실제 주소 분석은 실행하지 않았어요. ${e instanceof TypeError ? '연구실 PC 서버에 연결하지 못했어요.' : e.message}`;
+  }
+}
+$('#check-surrogate').addEventListener('click', checkSurrogate);
 
 function renderPublicData(data) {
   $('#data-source').textContent = `조회: ${new Date(data.retrieved_at).toLocaleString('ko-KR')} · ${Object.values(data.sources).join(' / ')}. 미확인 항목은 — 또는 확인 필요로 표시해요.`;
@@ -412,7 +461,10 @@ $('#photo-back').addEventListener('click', () => { drawFaceList(); show('site');
 // ---------- 3. 결과 ----------
 function showResult() {
   if (!S.irr) return;
-  const r = evaluate({ site: S.site, irr: S.irr, params: S.params, cellsFrac: S.cellsFrac, annualKwh: null });
+  let r;
+  try { r = evaluate({ site: S.site, irr: S.irr, params: S.params, cellsFrac: S.cellsFrac, annualKwh: null }); }
+  catch (e) { $('#facade-status').textContent = e.message; return; }
+  $('#result-source').textContent = S.site.source === 'public_api' ? '추정 분석 결과 · 계산에 쓴 가정과 한계를 확인하세요.' : '[가상 데모] 실제 주소의 분석 결과가 아니에요.';
   const t = r.total;
   $('#verdict').innerHTML = `<span class="badge b-${r.verdict}">${r.verdict}</span>
     <p>${esc(r.reasons[0])}</p>${r.reasons.length > 1 ? `<ul>${r.reasons.slice(1).map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}`;

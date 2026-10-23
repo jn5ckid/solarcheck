@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { evaluate, loadShape, verdictOf } from '../docs/calc.js';
+import { evaluate, loadShape, verdictOf, validateIrradiance } from '../docs/calc.js';
 
 const params = JSON.parse(readFileSync(new URL('../docs/params.json', import.meta.url)));
 const flat = Array.from({ length: 8760 }, (_, h) => (h % 24 >= 9 && h % 24 < 17 ? 100 : 0));
@@ -59,4 +59,29 @@ test('발전이 없는 면은 부적합, 추천 면이 없으면 건물도 부�
   const r = evaluate({ site, irr: dark, params });
   assert.equal(r.verdict, '부적합');
   assert.ok(r.faces.every(f => f.verdict === '부적합'));
+});
+
+test('연간 총량만으로 시간별 결과를 만들지 않는다', () => {
+  const annualOnly = { faces: { F01: { annual: [1000, 500] } } };
+  assert.throws(() => validateIrradiance(site, annualOnly), /8,760/);
+  const badMask = { F01: [1] };
+  assert.throws(() => validateIrradiance(site, irr, badMask), /사진 편집 격자/);
+});
+
+test('격자별 시간 일사량에 사진 마스크를 적용해 서로 다른 발전 시간을 보존한다', () => {
+  const early = Array(8760).fill(0), late = Array(8760).fill(0);
+  // Each cell has 1000 kWh/m²/year, with generation at distinct real time bins.
+  for (let day = 0; day < 365; day++) { early[day * 24 + 9] = 1000000 / 365; late[day * 24 + 16] = 1000000 / 365; }
+  const oneFace = { ...site, faces: [site.faces[0]] };
+  const cellIrr = { model: 'E2c', weather: 'fixture', reference_year: 2021,
+    faces: { F01: { annual: [1000, 1000], hourly: early.map((w, h) => (w + late[h]) / 2), hourly_cells: [early, late] } } };
+  const r = evaluate({ site: oneFace, irr: cellIrr, params, cellsFrac: { F01: [0, .5] } });
+  assert.equal(r.faces[0].gen[9], 0);
+  assert.ok(r.faces[0].gen[16] > 0);
+  assert.equal(r.faces[0].area_m2, 5);
+  assert.ok(Math.abs(r.faces[0].gen.reduce((a, b) => a + b, 0) - r.faces[0].kwh) < 1e-6);
+  const inconsistent = structuredClone(cellIrr); inconsistent.faces.F01.annual[0] = 500;
+  assert.throws(() => validateIrradiance(oneFace, inconsistent), /합계/);
+  delete inconsistent.faces.F01.hourly_cells;
+  assert.throws(() => validateIrradiance(oneFace, inconsistent), /시간 출력/);
 });

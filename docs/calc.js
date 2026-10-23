@@ -1,16 +1,15 @@
 // 발전량·경제성 산정과 판정. 브라우저와 node 테스트가 같은 파일을 쓴다.
 
-const DOW_JAN1 = 3; // 2026-01-01 = 목요일 (월 = 0). 공휴일은 반영하지 않음
-
 export const DIR8 = ['북', '북동', '동', '남동', '남', '남서', '서', '북서'];
 export const faceName = f => f.type === 'roof' ? '지붕' : `${DIR8[Math.round(f.azimuth_deg / 45) % 8]}측 입면`;
 
 const sum = a => a.reduce((s, x) => s + x, 0);
 
-export function loadShape(params, use) {
+export function loadShape(params, use, referenceYear = 2026) {
+  const dowJan1 = (new Date(Date.UTC(referenceYear, 0, 1)).getUTCDay() + 6) % 7;
   const prof = params.load_profile_24h.value[use] ?? params.load_profile_24h.value['근린생활시설'];
   const raw = Array.isArray(prof) ? prof : Array.from({ length: 8760 }, (_, h) => {
-    const dow = (Math.floor(h / 24) + DOW_JAN1) % 7;
+    const dow = (Math.floor(h / 24) + dowJan1) % 7;
     return (dow >= 5 ? prof.weekend : prof.weekday)[h % 24];
   });
   const total = sum(raw);
@@ -37,24 +36,29 @@ export function openingRatio(cellsFrac, params) {
  * @param annualKwh  건물 연간 전력 사용량 (없으면 용도별 원단위 × 연면적)
  */
 export function evaluate({ site, irr, params, cellsFrac = {}, annualKwh = null }) {
+  validateIrradiance(site, irr, cellsFrac);
   const V = k => params[k].value;
   const b = site.building;
   const T = V('payback_threshold_y');
   const openR = openingRatio(cellsFrac, params);
   const rate = V('tariff_won_per_kwh')[b.tariff] ?? V('tariff_won_per_kwh')['일반용'];
   const usage = annualKwh ?? b.gfa_m2 * (V('annual_kwh_per_m2_gfa')[b.use] ?? V('annual_kwh_per_m2_gfa')['근린생활시설']);
-  const load = loadShape(params, b.use).map(x => x * usage);
+  const load = loadShape(params, b.use, irr.reference_year ?? 2026).map(x => x * usage);
 
   const faces = site.faces.map(face => {
-    const { annual, hourly } = irr.faces[face.face_id];
+    const { annual, hourly, hourly_cells: hourlyCells } = irr.faces[face.face_id];
     const roof = face.type === 'roof';
     const fr = roof ? null : cellsFrac[face.face_id];
     let area = 0, hSum = 0, shaded = 0;
+    const installedHourly = hourlyCells ? Array(8760).fill(0) : null;
     annual.forEach((H, i) => {
       const f = roof ? 1 : fr ? fr[i] : 1 - openR;
       if (H < V('min_annual_kwh_m2')) { shaded += face.cell_area_m2 * f; return; }
       area += face.cell_area_m2 * f;
       hSum += H * face.cell_area_m2 * f;
+      if (installedHourly) hourlyCells[i].forEach((w, h) => {
+        installedHourly[h] += w / 1000 * face.cell_area_m2 * f * V('module_kw_per_m2') * V('performance_ratio');
+      });
     });
     const type = roof ? 'roof' : 'facade';
     const kw = area * V('module_kw_per_m2');
@@ -66,7 +70,7 @@ export function evaluate({ site, irr, params, cellsFrac = {}, annualKwh = null }
     return {
       face_id: face.face_id, name: faceName(face), type, photo: Boolean(fr),
       area_m2: area, shaded_m2: shaded, kw, kwh, kwh_per_kw: kw ? kwh / kw : 0,
-      cost, subsidy, cladding, gen: hourly.map(x => hTot ? kwh * x / hTot : 0),
+      cost, subsidy, cladding, gen: installedHourly ?? hourly.map(x => hTot ? kwh * x / hTot : 0),
     };
   });
 
@@ -99,6 +103,10 @@ export function evaluate({ site, irr, params, cellsFrac = {}, annualKwh = null }
 
   const assumptions = [
     `일사: ${irr.weather}, ${irr.model === 'analytic' ? '해석식 모델' : irr.model}`,
+    ...(site.faces.some(f => !irr.faces[f.face_id].hourly_cells)
+      ? ['시간별 발전 분포: 면 평균 일사 분포를 사용한 근사이며 사진으로 고른 칸의 시간별 차이는 반영하지 못함']
+      : ['시간별 발전량: 격자별 시간 일사량에 사진 편집 비율과 일사 기준을 적용']),
+    ...(irr.limitations ?? []),
     Object.keys(cellsFrac).length
       ? `촬영하지 않은 입면은 촬영한 면의 개구율 ${Math.round(openR * 100)}%를 적용`
       : `입면 사진이 없어 개구율 ${Math.round(openR * 100)}%를 가정`,
@@ -108,6 +116,30 @@ export function evaluate({ site, irr, params, cellsFrac = {}, annualKwh = null }
   ];
 
   return { verdict, threshold: T, total: tot, faces, reasons: reasons(verdict, tot, faces, b), assumptions };
+}
+
+export function validateIrradiance(site, irr, cellsFrac = {}) {
+  const valid = a => Array.isArray(a) && a.every(x => Number.isFinite(x) && x >= 0);
+  if (!irr?.faces) throw new Error('일사량 자료가 없어요.');
+  for (const face of site.faces) {
+    const data = irr.faces[face.face_id];
+    if (!data || !valid(data.annual) || !data.annual.length || !valid(data.hourly) || data.hourly.length !== 8760) {
+      throw new Error('격자별 연간 일사량과 실제 8,760시간 분포가 필요해요. 연간 총량으로 시간 분포를 만들지 않아요.');
+    }
+    if (face.ns && face.nt && data.annual.length !== face.ns * face.nt) throw new Error('입면 격자와 일사량 개수가 달라요.');
+    const fractions = cellsFrac[face.face_id];
+    if (fractions && (!valid(fractions) || fractions.length !== data.annual.length || fractions.some(x => x > 1))) {
+      throw new Error('사진 편집 격자와 일사량 격자가 달라요.');
+    }
+    if (irr.model === 'E2c' && !data.hourly_cells) throw new Error('E2c는 격자별 시간 출력이 필요해요.');
+    if (data.hourly_cells) {
+      if (!Array.isArray(data.hourly_cells) || data.hourly_cells.length !== data.annual.length
+        || data.hourly_cells.some((row, i) => !valid(row) || row.length !== 8760
+          || Math.abs(sum(row) / 1000 - data.annual[i]) > Math.max(.01, data.annual[i] * .00001))) {
+        throw new Error('격자별 시간 일사량의 단위·개수·연간 합계가 맞지 않아요.');
+      }
+    }
+  }
 }
 
 function reasons(verdict, tot, faces, b) {

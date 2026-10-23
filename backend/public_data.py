@@ -344,7 +344,10 @@ class PublicBuildings:
         if chosen['geo'].interiors: warnings.append('중정이 있는 건물의 내부 벽면은 사진 정합 대상에서 제외했어요.')
         return {'status': 'ok', 'site': {'site_id': site_id, 'name': info.get('name') or chosen['name'],
                     'address': info.get('address') or parcel_address or refined, 'lat': lat, 'lon': lon,
-                    'building': info, 'target': target, 'faces': faces, 'context': context, 'source': 'public_api'},
+                    'building': info, 'target': target, 'faces': faces, 'context': context, 'source': 'public_api',
+                    'geometry_frame': {'crs': local_crs.to_string(), 'origin_in_crs_m': list(center),
+                                       'units': 'm', 'axes': 'east,north,up',
+                                       'z_reference': 'flat_ground_assumption_not_georeferenced'}},
                 'neighbors': neighbors, 'radius_m': radius, 'neighbor_count': len(neighbors),
                 'radius_center': 'address_coordinate',
                 'modeled_neighbor_count': len(context), 'neighbors_complete': complete,

@@ -1,0 +1,85 @@
+{
+  "verified_at_utc": "2026-10-23T12:49:55.161214+00:00",
+  "model": "E2c",
+  "checkpoint_sha256": "3858A559C3E6DA3DB38DB009FDE3E33218264A03235F424EE76AC87AD32D8604",
+  "normalization_sha256": "E6AAEF63A1267D7E57FE6265C4A23726A4702AAB53557842979F1F683088B135",
+  "solar_sha256": "87EC3C0DAE5F2992C3934D993B04DCB5745B8F9B53467CB10AE78F1D3B56CECE",
+  "runtime": {
+    "torch": "2.14.1+cpu",
+    "device": "cpu"
+  },
+  "new_inference_check": {
+    "sensors": 8,
+    "roof": 4,
+    "facade": 4,
+    "hours_per_sensor": 8760,
+    "selection": "four evenly spaced in-range sensor IDs per surface in existing clean validation order",
+    "max_abs_vs_original_hourly_w_m2": 0.000244140625,
+    "max_abs_vs_original_annual_kwh_m2": 0.00014437699314839847,
+    "night_exact_zero": true,
+    "passed": true,
+    "vs_climatestudio_hourly_w_m2": {
+      "r2": 0.989797441834812,
+      "rmse": 27.591575579797038,
+      "mae": 12.371993136353051,
+      "mbe": -0.6513948342719567
+    }
+  },
+  "existing_development_cache_metrics": {
+    "All": {
+      "sensors": 523,
+      "hourly_w_m2": {
+        "r2": 0.9496086240999353,
+        "rmse": 61.02181247309154,
+        "mae": 23.622380732491298,
+        "mbe": 1.4160486604253095
+      },
+      "annual_kwh_m2": {
+        "r2": 0.9736063403508651,
+        "rmse": 91.1429070410691,
+        "mae": 50.013024855707606,
+        "mbe": 6.2787597603258245
+      }
+    },
+    "Roof": {
+      "sensors": 273,
+      "hourly_w_m2": {
+        "r2": 0.9759704382224843,
+        "rmse": 44.847207839954926,
+        "mae": 14.814927397313033,
+        "mbe": 0.4081637083613456
+      },
+      "annual_kwh_m2": {
+        "r2": 0.9628079161791299,
+        "rmse": 42.42544812718938,
+        "mae": 23.231306610911265,
+        "mbe": 1.809797882874207
+      }
+    },
+    "Facade": {
+      "sensors": 250,
+      "hourly_w_m2": {
+        "r2": 0.8602981039432314,
+        "rmse": 74.79031342517962,
+        "mae": 33.24011977450596,
+        "mbe": 2.5166590280791583
+      },
+      "annual_kwh_m2": {
+        "r2": 0.8975745235261956,
+        "rmse": 124.14827649899401,
+        "mae": 79.25866117902522,
+        "mbe": 11.15886613050299
+      }
+    }
+  },
+  "cache_sha256": {
+    "prediction": "935949E26A2C86C92B20E7E49DA936591709659E3BBBAE3149019D6D32DF211E",
+    "target": "BCD23478BD6F7EAEDDAC166B31D21D486A580E5F16E0713297C0CBFE02F81949"
+  },
+  "limits": [
+    "Eight sensors were newly inferred; full523 metrics use existing research caches.",
+    "Repeatedly used development validation; not independent test performance.",
+    "No test/holdout file was opened. No new address was evaluated.",
+    "Geographic registration, terrain datum and new-site validation are still missing."
+  ]
+}

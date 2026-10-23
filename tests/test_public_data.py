@@ -60,6 +60,8 @@ class PublicDataTests(unittest.TestCase):
         self.assertEqual(b['height_m'], 16.5)
         self.assertEqual(b['height_source'], 'floor_estimate')
         self.assertNotIn('irradiance', r)
+        self.assertIn('+proj=aeqd', r['site']['geometry_frame']['crs'])
+        self.assertEqual(r['site']['geometry_frame']['z_reference'], 'flat_ground_assumption_not_georeferenced')
         self.assertEqual(r['neighbor_count'], 1)
         self.assertEqual(len(r['site']['faces']), 4)
 

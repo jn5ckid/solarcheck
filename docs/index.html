@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>솔라체크 · 외피 태양광 사전진단</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="style.css?v=20261023-photo-options">
-<script type="module" src="app.js?v=20261023-photo-options"></script>
+<link rel="stylesheet" href="style.css?v=20261023-surrogate">
+<script type="module" src="app.js?v=20261023-surrogate"></script>
 </head>
 <body>
 <header class="top">
@@ -59,10 +59,18 @@
     <p id="facade-status" class="hint" role="status">입면 사진은 건물·방향별로 이 기기의 브라우저에 저장돼요.</p>
     <h2>사진을 촬영·적용할 입면을 고르세요</h2>
     <ul id="face-list" class="faces"></ul>
+    <details id="irradiance-grid" hidden>
+      <summary id="irradiance-grid-title">선택 입면의 격자별 연간 일사량</summary>
+      <p id="irradiance-grid-note" class="hint"></p>
+      <canvas id="irradiance-canvas" aria-label="격자별 연간 일사량. 칸을 누르면 수치가 표시돼요."></canvas>
+      <output id="irradiance-cell-value" class="hint" aria-live="polite"></output>
+    </details>
+    <p id="surrogate-status" class="hint" role="status">실제 주소의 분석 가능 여부는 연구실 PC 연결 후 확인해요.</p>
     <div class="actions">
       <button id="go-photo" class="primary" disabled>선택한 입면 사진 촬영·선택</button>
       <button id="remove-photo" class="ghost" hidden>선택한 입면 사진 지우기</button>
       <button id="go-result" class="ghost">사진 없이 결과 보기</button>
+      <button id="check-surrogate" class="ghost" type="button">일사량 모델 상태 확인</button>
     </div>
   </section>
 
@@ -99,6 +107,7 @@
   </section>
 
   <section id="step-result" class="step" hidden>
+    <p id="result-source" class="hint"></p>
     <div id="verdict" class="verdict"></div>
     <div id="metrics" class="metrics"></div>
     <h2>회수기간 비교</h2>

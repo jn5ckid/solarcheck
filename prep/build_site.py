@@ -1,7 +1,9 @@
 """사전 계산: prep/sites/<id>.json (+ EPW) → docs/data/sites/<id>/{site,irradiance}.json
 
 일사 모델은 해석식이다: 직달 × 입사각 × 태양 가시도(지평선 시그모이드)
-+ 등방 확산 × 천공 계수 + 지면 반사. 대리모델로 바꿀 때는 face_irradiance()만 교체한다.
++ 등방 확산 × 천공 계수 + 지면 반사. 가상 예제용 해석식이며 E2c 추론이 아니다.
+E2c 연결에는 함수 교체 외에 연구 XYZ 지리 정합, 고정 정규화, 원래 HH:30
+기상 시간축과 8방위/2도 soft-SF 계약이 필요하다. SURROGATE_INTEGRATION.md 참고.
 
 사용: python prep/build_site.py prep/sites/demo_seoul.json [--epw 파일.epw]
 """

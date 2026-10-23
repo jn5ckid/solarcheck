@@ -13,7 +13,11 @@ if (Test-Path -LiteralPath $stateFile) {
     $old = Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
     $existing = Get-Process -Id $old.processId -ErrorAction SilentlyContinue
     if ($existing -and $existing.Path -eq $tunnelExe -and $existing.StartTime.ToUniversalTime().ToString('o') -eq $old.startedAt) {
-        if ($old.shareUrl) { Write-Output $old.shareUrl; exit 0 }
+        if ($old.shareUrl) {
+            Write-Output ('SolarCheck: https://jn5ckid.github.io/solarcheck/?api=' + [uri]::EscapeDataString($old.apiUrl))
+            Write-Output ('Connection test: ' + $old.shareUrl)
+            exit 0
+        }
         throw 'The previous tunnel is still starting. Inspect .venv\tunnel\stderr.log.'
     }
 }
@@ -35,6 +39,7 @@ for ($attempt = 0; $attempt -lt 45; $attempt++) {
         Write-Output ('Tunnel PID: ' + $state.processId)
         Write-Output ('API: ' + $state.apiUrl)
         Write-Output ('Open: ' + $state.shareUrl)
+        Write-Output ('SolarCheck: https://jn5ckid.github.io/solarcheck/?api=' + [uri]::EscapeDataString($state.apiUrl))
         exit 0
     }
 }

@@ -20,18 +20,31 @@
 <main>
   <section id="step-site" class="step">
     <h1>우리 건물 외피 태양광 체크</h1>
-    <p><a href="connection-test/">연구실 PC 연결 시험</a></p>
+    <details class="server-settings">
+      <summary>연구실 PC 연결 설정</summary>
+      <label class="field">분석 서버 주소<input id="api-url" type="url" placeholder="https://…trycloudflare.com" autocomplete="off"></label>
+      <button id="api-check" class="ghost" type="button">연결 확인</button>
+      <p id="api-status" class="hint" role="status">연구실 PC 서버가 실행 중이어야 주소를 조회할 수 있어요.</p>
+      <a id="connection-link" href="connection-test/">사진 전송 연결 시험</a>
+    </details>
     <form id="building-search" class="building-search">
-      <label class="field">건물 주소 또는 이름
-        <input id="building-query" type="search" placeholder="등록된 건물의 주소 또는 이름" aria-describedby="building-search-note">
+      <label class="field">건물 주소
+        <input id="building-query" type="search" placeholder="시·군·구와 도로명·건물번호" required minlength="3" maxlength="300" aria-describedby="building-search-note">
       </label>
-      <button class="ghost" type="submit">등록 건물 찾기</button>
+      <label class="field">주변 조회 반경<select id="lookup-radius"><option value="100">100m</option><option value="200" selected>200m</option><option value="300">300m</option></select></label>
+      <button id="lookup-submit" class="primary" type="submit">주소로 자동 조회</button>
     </form>
-    <p id="building-search-note" class="hint" role="status">현재 데모 건물만 등록되어 있어요. 실제 주소의 건물 형상 조회는 아직 연결 전이에요.</p>
-    <label class="field">불러올 건물
+    <p id="building-search-note" class="hint" role="status">주소를 입력하면 공공 데이터에서 건물과 주변 형상을 불러와요. 현재 아래는 가상 데모예요.</p>
+    <div id="lookup-choices" class="lookup-choices" hidden></div>
+    <label class="field">예제 건물로 체험하기
       <select id="site-select"></select>
     </label>
+    <h2 id="loaded-building-name"></h2>
     <dl id="site-info" class="info"></dl>
+    <div id="public-data-details" hidden>
+      <details><summary>조회 출처와 확인할 사항</summary><p id="data-source" class="hint"></p><ul id="lookup-warnings"></ul></details>
+      <details><summary id="neighbor-summary">주변 건물 정보</summary><p class="hint">반경은 입력 주소 좌표를 기준으로 해요. 거리는 대상과 주변 건물 외곽 사이의 최단거리예요. 층수 × 3.3m로 만든 높이는 추정값이에요.</p><div class="table-scroll"><table id="neighbor-table"></table></div></details>
+    </div>
     <figure class="building-model">
       <canvas id="building-canvas" tabindex="0" aria-label="건물 3D 입면 보기. 드래그 또는 방향키로 회전하고 휠이나 더하기·빼기 키로 확대하세요."></canvas>
       <figcaption>건물을 돌려 보고 사진을 붙일 벽면을 선택하세요.</figcaption>
@@ -48,7 +61,7 @@
       <summary>배치도와 입면 일사량 보기</summary>
       <figure class="plan">
       <svg id="plan" viewBox="0 0 360 300" role="img" aria-label="대상 건물과 주변 건물 배치도"></svg>
-      <figcaption>입면 색은 연간 일사량이에요. 진할수록 햇빛을 많이 받아요.</figcaption>
+      <figcaption id="plan-caption">입면 색은 데모 연간 일사량이에요. 실제 건물은 분석 후 표시해요.</figcaption>
       </figure>
     </details>
     <h2>사진을 붙일 입면을 고르세요</h2>

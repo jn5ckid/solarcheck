@@ -32,7 +32,7 @@ small { color: var(--muted); font-weight: 400; }
 .steps li.on { background: var(--sun); color: var(--ink); font-weight: 700; }
 
 .field { display: block; position: relative; margin: 12px 0; font-weight: 600; font-size: .9rem; }
-select, input[type=number], input[type=search] {
+select, input[type=number], input[type=search], input[type=url] {
   display: block; width: 100%; margin-top: 6px; padding: 12px; font: inherit; font-weight: 400;
   font-size: 1rem; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 10px;
 }
@@ -47,6 +47,17 @@ select, input[type=number], input[type=search] {
 .plan svg { display: block; width: 100%; height: auto; }
 .plan figcaption { padding: 4px 8px 6px; font-size: .82rem; color: var(--muted); }
 .building-search .ghost { width: 100%; padding: 10px; }
+.building-search .primary { width: 100%; }
+button:disabled { opacity: .55; cursor: default; }
+.lookup-choices { display: grid; gap: 8px; margin: 12px 0; }
+.lookup-choices[hidden] { display: none; }
+.lookup-choices button { text-align: left; border: 1px solid var(--line); background: white; font-size: .9rem; }
+.table-scroll { overflow: auto; max-height: 420px; margin-top: 12px; }
+#neighbor-table { border-collapse: collapse; min-width: 620px; width: 100%; font-size: .8rem; }
+#neighbor-table th, #neighbor-table td { border-bottom: 1px solid var(--line); padding: 8px; text-align: left; }
+#neighbor-table th { position: sticky; top: 0; background: #eef3f1; }
+#data-source { overflow-wrap: anywhere; }
+.info dd { overflow-wrap: anywhere; }
 .building-model { margin: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
 #building-canvas { width: 100%; height: 340px; border-radius: 0; cursor: grab; touch-action: none; }
 #building-canvas:active { cursor: grabbing; }

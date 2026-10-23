@@ -4,3 +4,5 @@ geopandas
 fastapi
 uvicorn
 python-multipart
+python-dotenv
+pyproj

@@ -15,6 +15,8 @@ const S = { params: null, site: null, irr: null, face: null, cellsFrac: {}, img:
 const viewer = new FacadeViewer($('#building-canvas'), id => pickFace(id));
 let siteLoadVersion = 0;
 
+const labelFace = f => `${faceName(f)}${S.site?.source === 'public_api' ? ` · ${f.face_id}` : ''}`;
+
 // ---------- 공통 ----------
 async function getJSON(url) {
   const r = await fetch(url);
@@ -35,6 +37,7 @@ function color(v, lo, hi) {
   return `rgb(${RAMP[i].map((c, k) => Math.round(c + (RAMP[i + 1][k] - c) * w))})`;
 }
 const range = () => {
+  if (!S.irr) return [0, 1];
   const all = Object.values(S.irr.faces).flatMap(f => f.annual);
   return [Math.min(...all), Math.max(...all)];
 };
@@ -46,15 +49,32 @@ async function loadSite(id) {
   const [site, irr] = await Promise.all([
     getJSON(`data/sites/${id}/site.json`), getJSON(`data/sites/${id}/irradiance.json`)]);
   if (version !== siteLoadVersion) return;
+  await displaySite(site, irr, version);
+}
+
+async function displaySite(site, irr, version = ++siteLoadVersion) {
+  const id = site.site_id;
   S.site = site; S.irr = irr;
   S.face = null; S.cellsFrac = {}; S.textures = {};
   viewer.setSite(site); viewer.setContext($('#model-context').checked);
-  const b = S.site.building, age = new Date().getFullYear() - b.approval_year;
+  const b = S.site.building;
+  $('#loaded-building-name').textContent = `${irr ? '[가상 데모] ' : ''}${site.name} · ${site.address}`;
+  const heightNote = b.height_source === 'floor_estimate' ? ' (층수로 추정)' : '';
+  const text = v => esc(v ?? '확인 필요');
   $('#site-info').innerHTML = `
-    <dt>사용승인</dt><dd>${b.approval_year ? `${b.approval_year}년 · ${age}년 경과${age >= 15 ? '<span class="tag">노후</span>' : ''}` : '확인 필요'}</dd>
-    <dt>용도</dt><dd>${esc(b.use)}</dd>
-    <dt>규모</dt><dd>지상 ${b.floors}층${b.gfa_m2 ? ` · ${fmt(b.gfa_m2)}㎡` : ''}</dd>
+    <dt>사용승인일</dt><dd>${text(b.approval_date || (b.approval_year ? `${b.approval_year}년` : null))}</dd>
+    <dt>주용도</dt><dd>${text(b.use)}</dd>
+    <dt>세부 용도</dt><dd>${text(b.other_use)}</dd>
+    <dt>층수</dt><dd>지상 ${fmt(b.floors)} / 지하 ${fmt(b.basement_floors)}층</dd>
+    <dt>연면적</dt><dd>${fmt(b.gfa_m2, 1)}㎡</dd>
+    <dt>건축 / 대지면적</dt><dd>${fmt(b.building_area_m2, 1)} / ${fmt(b.land_area_m2, 1)}㎡</dd>
+    <dt>높이</dt><dd>${b.height_m ? `${fmt(b.height_m, 1)}m${heightNote}` : '확인 필요'}</dd>
+    <dt>구조</dt><dd>${text(b.structure)}</dd>
     <dt>주변 건물</dt><dd>${S.site.context.length}동 반영</dd>`;
+  $('#public-data-details').hidden = !!irr;
+  $('#plan-caption').textContent = irr ? '가상 데모 건물의 연간 일사량이에요.' : '공공 데이터로 불러온 건물 외곽과 주변 배치예요. 일사량은 아직 분석하지 않았어요.';
+  $('#go-result').disabled = !irr;
+  $('#go-result').textContent = irr ? '사진 없이 데모 결과 보기' : '일사량 분석 연결 전';
   drawPlan();
   drawFaceList();
   $('#go-photo').disabled = true;
@@ -85,7 +105,8 @@ async function loadSite(id) {
   $('#facade-status').textContent = !storageAvailable ? '사진 저장소를 사용할 수 없어 현재 화면에만 사진을 입힐 수 있어요.'
     : count ? `이 건물의 입면 ${count}곳에 저장된 사진을 불러왔어요.`
       : '입면을 고르고 사진의 네 모서리를 지정하면 해당 벽면에 입혀요. 사진은 이 기기에 저장돼요.';
-  $('#go-result').textContent = count ? '진단 결과 보기' : '사진 없이 결과 보기';
+  if (irr) $('#go-result').textContent = count ? '데모 진단 결과 보기' : '사진 없이 데모 결과 보기';
+  if (!site.faces.length) $('#facade-status').textContent = '높이가 없어 사진을 붙일 입면을 만들지 못했어요. 배치도에서 건물 외곽을 확인할 수 있어요.';
 }
 
 function drawPlan() {
@@ -102,9 +123,9 @@ function drawPlan() {
       <text x="${P([cx, cy]).split(',')[0]}" y="${+P([cx, cy]).split(',')[1] + 4}" text-anchor="middle" font-size="10" fill="#4b5d57">${Math.round(c.height_m)}m</text>`;
   }).join('');
   const edges = S.site.faces.filter(f => f.type === 'facade').map(f => {
-    const v = mean(S.irr.faces[f.face_id].annual);
+    const v = S.irr ? mean(S.irr.faces[f.face_id].annual) : null;
     return `<line class="edge${S.face === f.face_id ? ' sel' : ''}" data-face="${f.face_id}" x1="${P(f.p0).split(',')[0]}" y1="${P(f.p0).split(',')[1]}"
-      x2="${P(f.p1).split(',')[0]}" y2="${P(f.p1).split(',')[1]}" stroke="${color(v, lo, hi)}" stroke-width="7" stroke-linecap="round"><title>${faceName(f)} · 연간 ${fmt(v)} kWh/㎡</title></line>`;
+      x2="${P(f.p1).split(',')[0]}" y2="${P(f.p1).split(',')[1]}" stroke="${v === null ? '#7d9587' : color(v, lo, hi)}" stroke-width="7" stroke-linecap="round"><title>${labelFace(f)} · ${v === null ? '일사 분석 전' : `연간 ${fmt(v)} kWh/㎡`}</title></line>`;
   }).join('');
   $('#plan').innerHTML = `${ctx}
     <polygon points="${S.site.target.map(P).join(' ')}" fill="#fff" stroke="#18302a" stroke-width="1"/>
@@ -117,15 +138,15 @@ function drawPlan() {
 function drawFaceList() {
   const [lo, hi] = range();
   $('#face-list').innerHTML = S.site.faces.map(f => {
-    const v = mean(S.irr.faces[f.face_id].annual);
+    const v = S.irr ? mean(S.irr.faces[f.face_id].annual) : null;
     const roof = f.type === 'roof';
     const sub = roof ? `${fmt(f.area_m2)}㎡ · 정사영상 분석 예정`
       : `폭 ${fmt(f.width_m, 1)}m · ${S.cellsFrac[f.face_id] ? '사진 반영됨' : '사진 없음'}`;
     const texture = S.textures[f.face_id];
     return `<li><button class="${texture ? 'has-photo' : ''}" data-face="${f.face_id}" aria-pressed="${S.face === f.face_id}" ${roof ? 'disabled' : ''}>
-      ${texture ? `<img class="face-thumbnail" src="${esc(texture.dataUrl)}" alt="">` : `<span class="swatch" style="background:${color(v, lo, hi)}"></span>`}
-      <span>${faceName(f)}<span class="sub">${sub}</span></span>
-      <span class="val">${fmt(v)}<span class="sub">kWh/㎡·년</span></span></button></li>`;
+      ${texture ? `<img class="face-thumbnail" src="${esc(texture.dataUrl)}" alt="">` : `<span class="swatch" style="background:${v === null ? '#7d9587' : color(v, lo, hi)}"></span>`}
+      <span>${labelFace(f)}<span class="sub">${sub}</span></span>
+      <span class="val">${v === null ? '<span class="sub">일사 분석 전</span>' : `${fmt(v)}<span class="sub">kWh/㎡·년</span>`}</span></button></li>`;
   }).join('');
   $('#face-list').querySelectorAll('button:not(:disabled)').forEach(b => b.addEventListener('click', () => pickFace(b.dataset.face)));
 }
@@ -137,7 +158,7 @@ function pickFace(id) {
   $('#model-front').disabled = false;
   $('#remove-photo').hidden = !S.textures[id];
   viewer.select(id);
-  $('#go-photo').textContent = `${faceName(face())} 사진 ${S.textures[id] ? '바꾸기' : '고르기'}`;
+  $('#go-photo').textContent = `${labelFace(face())} 사진 ${S.textures[id] ? '바꾸기' : '고르기'}`;
 }
 
 $('#model-reset').addEventListener('click', () => viewer.reset());
@@ -152,21 +173,84 @@ $('#remove-photo').addEventListener('click', async () => {
   if (S.site.site_id !== siteId) return;
   delete S.textures[id]; delete S.cellsFrac[id];
   viewer.setPhotos(S.textures); drawFaceList(); pickFace(id);
-  $('#go-result').textContent = Object.keys(S.textures).length ? '진단 결과 보기' : '사진 없이 결과 보기';
-  $('#facade-status').textContent = `${faceName(face())} 사진을 지웠어요.`;
+  if (S.irr) $('#go-result').textContent = Object.keys(S.textures).length ? '데모 진단 결과 보기' : '사진 없이 데모 결과 보기';
+  $('#facade-status').textContent = `${labelFace(face())} 사진을 지웠어요.`;
 });
 
-$('#building-search').addEventListener('submit', async e => {
-  e.preventDefault();
-  const query = $('#building-query').value.trim().replace(/\s/g, '').toLowerCase();
-  const found = query && S.index.find(s => `${s.name}${s.address}`.replace(/\s/g, '').toLowerCase().includes(query));
-  if (!found) {
-    $('#building-search-note').textContent = '일치하는 등록 건물이 없어요. 실제 주소 자동 조회는 연결 전이며, 아래에서 데모 건물을 선택해 시험할 수 있어요.';
-    return;
+// Address lookup, credentials stay on the research PC.
+let lookupVersion = 0, lookupAbort;
+const serverUrl = () => {
+  let url;
+  try { url = new URL($('#api-url').value.trim()); } catch { throw new Error('연구실 PC 연결 설정에 서버 주소를 입력해 주세요.'); }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash
+    || (url.pathname !== '/' && url.pathname !== '')) throw new Error('서버의 기본 주소만 입력해 주세요.');
+  if (location.protocol === 'https:' && url.protocol !== 'https:') throw new Error('공개 화면에서는 HTTPS 터널 주소가 필요해요.');
+  return url.origin;
+};
+function rememberServer() {
+  const url = serverUrl();
+  try { localStorage.setItem('solarcheck-api-url', url); } catch { /* browser storage optional */ }
+  $('#connection-link').href = `connection-test/?api=${encodeURIComponent(url)}`;
+  return url;
+}
+async function checkServer() {
+  $('#api-status').textContent = '연구실 PC 연결을 확인하고 있어요…';
+  try {
+    const r = await fetch(`${rememberServer()}/api/config`, {signal: AbortSignal.timeout(12000)});
+    if (!r.ok) throw new Error('서버의 주소 조회 기능을 확인하지 못했어요. Python 서버를 다시 시작해 주세요.');
+    const c = await r.json();
+    $('#api-status').textContent = `연구실 PC 연결됨 · 브이월드 ${c.vworld_ready ? '키 설정됨' : '키 필요'} · 건축HUB ${c.registry_ready ? '키 설정됨' : '키 필요 (사용승인일·용도·면적)'}`;
+  } catch (e) { $('#api-status').textContent = e instanceof TypeError ? '서버에 연결하지 못했어요. PC 서버와 터널이 실행 중인지 확인해 주세요.' : e.message; }
+}
+$('#api-check').addEventListener('click', checkServer);
+$('#api-url').addEventListener('change', () => { lookupAbort?.abort(); ++lookupVersion; checkServer(); });
+
+function renderPublicData(data) {
+  $('#data-source').textContent = `조회: ${new Date(data.retrieved_at).toLocaleString('ko-KR')} · ${Object.values(data.sources).join(' / ')}. 미확인 항목은 — 또는 확인 필요로 표시해요.`;
+  $('#lookup-warnings').innerHTML = data.warnings.map(w => `<li>${esc(w)}</li>`).join('');
+  $('#neighbor-summary').textContent = `주변 ${data.neighbor_count}동 · 3D 반영 ${data.modeled_neighbor_count}동 · 반경 ${data.radius_m}m${data.neighbors_complete ? '' : ' (일부 누락 가능)'}`;
+  $('#neighbor-table').innerHTML = '<thead><tr><th>건물 / 동</th><th>거리 / 방향</th><th>지상층</th><th>높이</th><th>용도</th><th>사용승인일</th><th>상세 조회</th></tr></thead><tbody>'
+    + data.neighbors.map(n => `<tr><td>${esc(n.name)} ${esc(n.dong_name)}</td><td>${fmt(n.distance_m, 1)}m / ${fmt(n.bearing_deg)}°</td><td>${fmt(n.floors)}</td><td>${fmt(n.height_m, 1)}m${n.height_source === 'floor_estimate' ? ' (추정)' : ''}</td><td>${esc(n.use || '—')}</td><td>${esc(n.approval_date || '—')}</td><td>${esc(({found:'확인',not_found:'자료 없음',not_requested:'미조회',multiple_records:'동 선택 필요',registry_key_missing:'키 필요'})[n.registry_status] || '조회 실패')}</td></tr>`).join('') + '</tbody>';
+}
+async function lookupBuilding(query) {
+  const version = ++lookupVersion;
+  lookupAbort?.abort(); lookupAbort = new AbortController();
+  const timeout = setTimeout(() => lookupAbort.abort(), 180000);
+  const button = $('#lookup-submit'); button.disabled = true;
+  $('#site-select').disabled = true; $('#api-url').disabled = true;
+  $('#lookup-choices').hidden = true;
+  $('#building-search-note').textContent = '주소·건물 형상·주변 건물을 조회하고 있어요. 건축물대장까지 조회하면 잠시 걸릴 수 있어요.';
+  try {
+    const r = await fetch(`${rememberServer()}/api/buildings/lookup`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(query), signal:lookupAbort.signal});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail?.message || `조회 요청에 실패했어요 (${r.status}). 서버를 다시 시작했는지 확인해 주세요.`);
+    if (version !== lookupVersion) return;
+    $('#building-search-note').textContent = data.message || '공공 데이터에서 건물을 불러왔어요. 실제 건물의 일사량·경제성 분석은 연결 전이에요.';
+    if (data.status === 'select_building' || data.status === 'select_record') {
+      const records = data.status === 'select_record';
+      const box = $('#lookup-choices'); box.replaceChildren(); box.hidden = false;
+      for (const c of data.candidates) {
+        const b = document.createElement('button'); b.type = 'button';
+        b.textContent = `${c.name || '이름 미제공'} ${c.dong_name || ''} · ${c.address || ''} · 지상 ${fmt(c.floors)}층${records ? ` · ${c.use || '용도 미제공'} · ${fmt(c.gfa_m2)}㎡` : ` · 주소 좌표에서 ${fmt(c.distance_m, 1)}m`}`;
+        b.addEventListener('click', () => lookupBuilding({...query, building_id: records ? data.building_id : c.id, record_id: records ? c.id : undefined}));
+        box.append(b);
+      }
+      return;
+    }
+    if (data.status !== 'ok') throw new Error('조회 결과의 형식을 확인하지 못했어요.');
+    await displaySite(data.site, null); renderPublicData(data);
+    $('#site-select').value = '';
+  } catch (e) {
+    if (version !== lookupVersion) return;
+    const message = e.name === 'AbortError' ? '조회 시간이 초과됐어요. 다시 시도해 주세요.' : e instanceof TypeError ? '연구실 PC에 연결하지 못했어요. 서버와 터널 주소를 확인해 주세요.' : e.message;
+    $('#building-search-note').textContent = `${message} 아래에는 이전에 불러온 건물이 표시돼요.`;
+  } finally {
+    clearTimeout(timeout);
+    if (version === lookupVersion) { button.disabled = false; $('#site-select').disabled = false; $('#api-url').disabled = false; }
   }
-  $('#site-select').value = found.site_id;
-  try { await loadSite(found.site_id); $('#building-search-note').textContent = `${found.name}을 불러왔어요. 데모 건물은 가상 형상이에요.`; }
-  catch (error) { $('#building-search-note').textContent = `건물을 불러오지 못했어요: ${error.message}`; }
+}
+$('#building-search').addEventListener('submit', e => {
+  e.preventDefault(); lookupBuilding({address:$('#building-query').value.trim(), radius_m:Number($('#lookup-radius').value)});
 });
 
 // ---------- 2. 입면 사진 ----------
@@ -175,8 +259,8 @@ const CORNERS = ['왼쪽 위', '오른쪽 위', '오른쪽 아래', '왼쪽 아�
 
 function openPhoto() {
   const f = face();
-  $('#photo-title').textContent = `${faceName(f)} 촬영`;
-  $('#photo-hint').textContent = `건물 밖에서 ${faceName(f)}을 정면으로 보고, 벽 전체가 들어오게 찍어 주세요.`;
+  $('#photo-title').textContent = `${labelFace(f)} 촬영`;
+  $('#photo-hint').textContent = `건물 밖에서 ${labelFace(f)}을 정면으로 보고, 벽 전체가 들어오게 찍어 주세요.`;
   S.img = null; S.rectImg = null; S.corners = [];
   S.cells = S.cellsFrac[S.face] ? [...S.cellsFrac[S.face]] : null;
   $('#corner-box').hidden = true;
@@ -300,11 +384,11 @@ function rectify() {
 function drawGrid() {
   const f = face(), cv = $('#rect-canvas'), g = cv.getContext('2d');
   const cw = cv.width / f.ns, ch = cv.height / f.nt;
-  const minH = S.params.min_annual_kwh_m2.value, annual = S.irr.faces[f.face_id].annual;
+  const minH = S.params.min_annual_kwh_m2.value, annual = S.irr?.faces[f.face_id]?.annual;
   g.putImageData(S.rectImg, 0, 0);
   for (let t = 0; t < f.nt; t++) for (let s = 0; s < f.ns; s++) {
     const i = t * f.ns + s, x = s * cw, y = (f.nt - 1 - t) * ch, v = S.cells[i];
-    if (annual[i] < minH) {
+    if (annual && annual[i] < minH) {
       g.fillStyle = 'rgba(141,156,151,.6)'; g.fillRect(x, y, cw, ch);
       g.strokeStyle = 'rgba(255,255,255,.7)'; g.lineWidth = 1;
       g.beginPath(); g.moveTo(x, y + ch); g.lineTo(x + cw, y); g.stroke();
@@ -339,8 +423,8 @@ $('#photo-done').addEventListener('click', async () => {
     let saved = true;
     try { await saveFacade(siteId, faceId, {dataUrl, cells}); } catch { saved = false; }
     viewer.setPhotos(S.textures); drawPlan(); drawFaceList(); pickFace(faceId);
-    $('#go-result').textContent = '진단 결과 보기';
-    $('#facade-status').textContent = saved ? `${faceName(face())}에 사진을 입혔어요. 이 기기의 브라우저에 저장했어요.`
+    if (S.irr) $('#go-result').textContent = '데모 진단 결과 보기';
+    $('#facade-status').textContent = saved ? `${labelFace(face())}에 사진을 입혔어요. 이 기기의 브라우저에 저장했어요.`
       : '사진을 입혔지만 브라우저에 저장하지 못했어요. 새로고침하면 사진이 사라질 수 있어요.';
     show('site'); viewer.faceFront();
     $('#building-canvas').scrollIntoView({block: 'center', behavior: 'instant'});
@@ -351,6 +435,7 @@ $('#photo-back').addEventListener('click', () => { drawFaceList(); show('site');
 
 // ---------- 3. 결과 ----------
 function showResult() {
+  if (!S.irr) return;
   const usage = Number($('#usage').value);
   const r = evaluate({ site: S.site, irr: S.irr, params: S.params, cellsFrac: S.cellsFrac, annualKwh: usage > 0 ? usage * 12 : null });
   const t = r.total;
@@ -396,8 +481,15 @@ addEventListener('beforeprint', () => document.querySelectorAll('details').forEa
     const [params, index] = await Promise.all([getJSON('params.json'), getJSON('data/sites/index.json')]);
     S.params = params;
     S.index = index;
+    let savedUrl = '';
+    try { savedUrl = localStorage.getItem('solarcheck-api-url') || ''; } catch { /* optional */ }
+    $('#api-url').value = new URLSearchParams(location.search).get('api') || savedUrl || (location.protocol === 'http:' ? 'http://127.0.0.1:8000' : '');
+    if ($('#api-url').value) checkServer();
     $('#site-select').innerHTML = index.map(s => `<option value="${esc(s.site_id)}">${esc(s.name)} — ${esc(s.address)}</option>`).join('');
-    $('#site-select').addEventListener('change', e => loadSite(e.target.value));
+    $('#site-select').addEventListener('change', async e => {
+      try { await loadSite(e.target.value); $('#lookup-choices').hidden = true; $('#building-search-note').textContent = '아래는 가상 데모 건물이에요. 주소 자동 조회 결과와 구분해 주세요.'; }
+      catch (err) { $('#building-search-note').textContent = err.message; }
+    });
     await loadSite(index[0].site_id);
     show('site');
   } catch (err) {

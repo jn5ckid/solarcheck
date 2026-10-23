@@ -60,7 +60,6 @@ export class FacadeViewer {
   }
 
   draw() {
-    if (!this.site) return;
     const width = this.canvas.clientWidth, height = this.canvas.clientHeight;
     if (!width || !height) return;
     const dpr = Math.min(devicePixelRatio || 1, 2), g = this.ctx;
@@ -69,6 +68,12 @@ export class FacadeViewer {
     }
     g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, width, height);
     g.fillStyle = '#e8efeb'; g.fillRect(0, 0, width, height);
+    this.hits = [];
+    if (!this.site?.building.height_m) {
+      g.fillStyle = '#315442'; g.font = '14px system-ui'; g.textAlign = 'center';
+      g.fillText('높이 확인 후 3D 입면을 만들 수 있어요.', width / 2, height / 2);
+      g.textAlign = 'start'; return;
+    }
     const site = this.site, targetHeight = site.building.height_m;
     const bounds = (this.context ? [site.target, ...site.context.map(b => b.footprint)] : [site.target]).flat();
     const xs = bounds.map(p => p[0]), ys = bounds.map(p => p[1]);

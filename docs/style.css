@@ -36,16 +36,12 @@ select, input[type=number], input[type=search], input[type=url] {
   display: block; width: 100%; margin-top: 6px; padding: 12px; font: inherit; font-weight: 400;
   font-size: 1rem; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 10px;
 }
-.unit { position: absolute; right: 12px; bottom: 13px; color: var(--muted); font-weight: 400; }
 
 .info { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 16px 0; padding: 14px 16px; background: var(--card); border-radius: 12px; }
 .info dt { color: var(--muted); }
 .info dd { margin: 0; text-align: right; font-weight: 600; }
 .tag { margin-left: 6px; padding: 1px 7px; border-radius: 6px; background: #fbe9b6; font-size: .8rem; color: #7a5400; }
 
-.plan { margin: 0; background: var(--card); border-radius: 12px; padding: 8px; }
-.plan svg { display: block; width: 100%; height: auto; }
-.plan figcaption { padding: 4px 8px 6px; font-size: .82rem; color: var(--muted); }
 .building-search .ghost { width: 100%; padding: 10px; }
 .building-search .primary { width: 100%; }
 button:disabled { opacity: .55; cursor: default; }
@@ -68,9 +64,6 @@ button:disabled { opacity: .55; cursor: default; }
 .model-tools button:disabled { opacity: .5; cursor: default; }
 .face-thumbnail { width: 40px; height: 45px; object-fit: cover; border: 1px solid var(--line); border-radius: 4px; }
 .faces button.has-photo { grid-template-columns: 40px 1fr auto; }
-.plan-detail { margin: 12px 0; }
-.edge { cursor: pointer; }
-.edge.sel { stroke: var(--ink) !important; }
 
 .faces { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .faces button, .faces.result li {

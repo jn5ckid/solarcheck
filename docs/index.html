@@ -57,19 +57,8 @@
       </div>
     </figure>
     <p id="facade-status" class="hint" role="status">입면 사진은 건물·방향별로 이 기기의 브라우저에 저장돼요.</p>
-    <details class="plan-detail">
-      <summary>배치도와 입면 일사량 보기</summary>
-      <figure class="plan">
-      <svg id="plan" viewBox="0 0 360 300" role="img" aria-label="대상 건물과 주변 건물 배치도"></svg>
-      <figcaption id="plan-caption">입면 색은 데모 연간 일사량이에요. 실제 건물은 분석 후 표시해요.</figcaption>
-      </figure>
-    </details>
     <h2>사진을 붙일 입면을 고르세요</h2>
     <ul id="face-list" class="faces"></ul>
-    <label class="field">월평균 전기 사용량 <small>선택 · 비우면 용도별 평균값</small>
-      <input id="usage" type="number" inputmode="numeric" min="0" placeholder="예: 8000" aria-describedby="usage-unit">
-      <span id="usage-unit" class="unit">kWh</span>
-    </label>
     <div class="actions">
       <button id="go-photo" class="primary" disabled>선택한 입면 사진 고르기</button>
       <button id="remove-photo" class="ghost" hidden>선택한 입면 사진 지우기</button>

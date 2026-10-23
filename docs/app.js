@@ -72,10 +72,8 @@ async function displaySite(site, irr, version = ++siteLoadVersion) {
     <dt>구조</dt><dd>${text(b.structure)}</dd>
     <dt>주변 건물</dt><dd>${S.site.context.length}동 반영</dd>`;
   $('#public-data-details').hidden = !!irr;
-  $('#plan-caption').textContent = irr ? '가상 데모 건물의 연간 일사량이에요.' : '공공 데이터로 불러온 건물 외곽과 주변 배치예요. 일사량은 아직 분석하지 않았어요.';
   $('#go-result').disabled = !irr;
   $('#go-result').textContent = irr ? '사진 없이 데모 결과 보기' : '일사량 분석 연결 전';
-  drawPlan();
   drawFaceList();
   $('#go-photo').disabled = true;
   $('#model-front').disabled = true;
@@ -106,33 +104,7 @@ async function displaySite(site, irr, version = ++siteLoadVersion) {
     : count ? `이 건물의 입면 ${count}곳에 저장된 사진을 불러왔어요.`
       : '입면을 고르고 사진의 네 모서리를 지정하면 해당 벽면에 입혀요. 사진은 이 기기에 저장돼요.';
   if (irr) $('#go-result').textContent = count ? '데모 진단 결과 보기' : '사진 없이 데모 결과 보기';
-  if (!site.faces.length) $('#facade-status').textContent = '높이가 없어 사진을 붙일 입면을 만들지 못했어요. 배치도에서 건물 외곽을 확인할 수 있어요.';
-}
-
-function drawPlan() {
-  const all = [S.site.target, ...S.site.context.map(c => c.footprint)].flat();
-  const xs = all.map(p => p[0]), ys = all.map(p => p[1]);
-  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
-  const k = Math.min(320 / (x1 - x0), 260 / (y1 - y0));
-  const ox = 180 - (x0 + x1) / 2 * k, oy = 150 + (y0 + y1) / 2 * k;
-  const P = ([x, y]) => `${(ox + x * k).toFixed(1)},${(oy - y * k).toFixed(1)}`;
-  const [lo, hi] = range();
-  const ctx = S.site.context.map(c => {
-    const cx = mean(c.footprint.slice(0, -1).map(p => p[0])), cy = mean(c.footprint.slice(0, -1).map(p => p[1]));
-    return `<polygon points="${c.footprint.map(P).join(' ')}" fill="#c3cfcb" stroke="#9fb0aa"/>
-      <text x="${P([cx, cy]).split(',')[0]}" y="${+P([cx, cy]).split(',')[1] + 4}" text-anchor="middle" font-size="10" fill="#4b5d57">${Math.round(c.height_m)}m</text>`;
-  }).join('');
-  const edges = S.site.faces.filter(f => f.type === 'facade').map(f => {
-    const v = S.irr ? mean(S.irr.faces[f.face_id].annual) : null;
-    return `<line class="edge${S.face === f.face_id ? ' sel' : ''}" data-face="${f.face_id}" x1="${P(f.p0).split(',')[0]}" y1="${P(f.p0).split(',')[1]}"
-      x2="${P(f.p1).split(',')[0]}" y2="${P(f.p1).split(',')[1]}" stroke="${v === null ? '#7d9587' : color(v, lo, hi)}" stroke-width="7" stroke-linecap="round"><title>${labelFace(f)} · ${v === null ? '일사 분석 전' : `연간 ${fmt(v)} kWh/㎡`}</title></line>`;
-  }).join('');
-  $('#plan').innerHTML = `${ctx}
-    <polygon points="${S.site.target.map(P).join(' ')}" fill="#fff" stroke="#18302a" stroke-width="1"/>
-    <text x="${P([0, 0]).split(',')[0]}" y="${+P([0, 0]).split(',')[1] + 4}" text-anchor="middle" font-size="11" font-weight="700" fill="#18302a">대상</text>
-    ${edges}
-    <g transform="translate(336 28)"><path d="M0 -14 L6 4 L0 0 L-6 4Z" fill="#18302a"/><text y="18" text-anchor="middle" font-size="10" fill="#18302a">N</text></g>`;
-  $('#plan').querySelectorAll('.edge').forEach(e => e.addEventListener('click', () => pickFace(e.dataset.face)));
+  if (!site.faces.length) $('#facade-status').textContent = '높이가 없어 사진을 붙일 입면을 만들지 못했어요. 건물의 높이 또는 지상층수 확인이 필요해요.';
 }
 
 function drawFaceList() {
@@ -153,7 +125,7 @@ function drawFaceList() {
 
 function pickFace(id) {
   S.face = id;
-  drawPlan(); drawFaceList();
+  drawFaceList();
   $('#go-photo').disabled = false;
   $('#model-front').disabled = false;
   $('#remove-photo').hidden = !S.textures[id];
@@ -422,7 +394,7 @@ $('#photo-done').addEventListener('click', async () => {
     S.cellsFrac[faceId] = cells; S.textures[faceId] = {image, dataUrl};
     let saved = true;
     try { await saveFacade(siteId, faceId, {dataUrl, cells}); } catch { saved = false; }
-    viewer.setPhotos(S.textures); drawPlan(); drawFaceList(); pickFace(faceId);
+    viewer.setPhotos(S.textures); drawFaceList(); pickFace(faceId);
     if (S.irr) $('#go-result').textContent = '데모 진단 결과 보기';
     $('#facade-status').textContent = saved ? `${labelFace(face())}에 사진을 입혔어요. 이 기기의 브라우저에 저장했어요.`
       : '사진을 입혔지만 브라우저에 저장하지 못했어요. 새로고침하면 사진이 사라질 수 있어요.';
@@ -436,8 +408,7 @@ $('#photo-back').addEventListener('click', () => { drawFaceList(); show('site');
 // ---------- 3. 결과 ----------
 function showResult() {
   if (!S.irr) return;
-  const usage = Number($('#usage').value);
-  const r = evaluate({ site: S.site, irr: S.irr, params: S.params, cellsFrac: S.cellsFrac, annualKwh: usage > 0 ? usage * 12 : null });
+  const r = evaluate({ site: S.site, irr: S.irr, params: S.params, cellsFrac: S.cellsFrac, annualKwh: null });
   const t = r.total;
   $('#verdict').innerHTML = `<span class="badge b-${r.verdict}">${r.verdict}</span>
     <p>${esc(r.reasons[0])}</p>${r.reasons.length > 1 ? `<ul>${r.reasons.slice(1).map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}`;
@@ -471,7 +442,7 @@ function showResult() {
 
 $('#go-photo').addEventListener('click', openPhoto);
 $('#go-result').addEventListener('click', showResult);
-$('#again').addEventListener('click', () => { drawPlan(); drawFaceList(); show('site'); });
+$('#again').addEventListener('click', () => { drawFaceList(); show('site'); });
 $('#print').addEventListener('click', () => print());
 addEventListener('beforeprint', () => document.querySelectorAll('details').forEach(d => { d.open = true; }));
 

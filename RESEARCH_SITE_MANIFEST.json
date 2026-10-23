@@ -1,0 +1,145 @@
+{
+  "spec_version": "solarcheck-research-site/v1",
+  "frozen_on": "2026-10-23",
+  "site_id": "original_research_site_sensor_disjoint_100k",
+  "scope": "same-site application in the original research-local XYZ frame",
+  "coordinate_frame": "original-research-local",
+  "primary_sensor_key": "sensor_row_index",
+  "georeference": {
+    "origin_address": "서울특별시 동작구 상도로47길 102",
+    "origin_lon": 126.95190436549447,
+    "origin_lat": 37.5037278415151,
+    "local_xy_origin_m": [
+      0.0,
+      0.0
+    ],
+    "axes": "east,north,up",
+    "horizontal_transform": "WGS84 to local azimuthal equidistant projection centered on the origin",
+    "verified_reference_building_id": "B1257",
+    "reference_centroid_distance_m": 1.259,
+    "reference_footprint_iou": 0.766
+  },
+  "non_unique_keys": [
+    "Space_ID+Index",
+    "building_id+Space_ID+Index"
+  ],
+  "model": {
+    "name": "E2c",
+    "kind": "E2cTiltAwareDiffuseMultiplicative",
+    "best_step": 2275,
+    "hours": 8760,
+    "daytime_hours": 4434,
+    "hourly_unit": "W/m2",
+    "annual_unit": "kWh/m2/year",
+    "weather": "Seoul TMYx 2004-2018 with a 2021 HH:30 reference time axis"
+  },
+  "population": {
+    "sensors": 100000,
+    "unique_sensor_ids": 100000,
+    "unique_spaces": 3270,
+    "unique_buildings": 1701,
+    "roof_sensors": 28387,
+    "facade_sensors": 71613,
+    "train_sensor_overlap": 0,
+    "development_sensor_overlap": 0,
+    "building_disjoint": false
+  },
+  "live_inference_policy": {
+    "inside_all_frozen_train_xyz_axes": 99313,
+    "blocked_outside_any_frozen_train_xyz_axis": 687,
+    "blocked_by_axis": {
+      "Px": 634,
+      "Py": 2,
+      "Pz": 51
+    },
+    "note": "Axis counts overlap. Annual evidence exists for all 100,000 sensors, but hourly reinference remains blocked for the 687 unique sensors outside at least one frozen training axis."
+  },
+  "identity_checks": {
+    "sample_horizon_sensor_order_match": true,
+    "sample_horizon_max_abs_xyz_difference_m": 5.684341886080802e-14,
+    "unit_normal_rows_outside_tolerance_1e-5": 0,
+    "horizon_min_deg": 0.0,
+    "horizon_max_deg": 90.0,
+    "duplicate_sensor_row_index": 0,
+    "duplicate_space_id_index": 5362
+  },
+  "artifacts": {
+    "geometry": {
+      "path": "3DM.3dm",
+      "bytes": 223192038,
+      "sha256": "C0EEFC9061F1543ACDDF33A5BB49F822322112206AE56E9D3C03B854F4C2C550"
+    },
+    "checkpoint": {
+      "resolver": "surrogate:checkpoint",
+      "bytes": 457781,
+      "sha256": "3858A559C3E6DA3DB38DB009FDE3E33218264A03235F424EE76AC87AD32D8604"
+    },
+    "normalization": {
+      "resolver": "surrogate:normalization",
+      "bytes": 12037,
+      "sha256": "E6AAEF63A1267D7E57FE6265C4A23726A4702AAB53557842979F1F683088B135"
+    },
+    "solar_features": {
+      "resolver": "surrogate:solar",
+      "bytes": 1421910,
+      "sha256": "87EC3C0DAE5F2992C3934D993B04DCB5745B8F9B53467CB10AE78F1D3B56CECE"
+    },
+    "sample": {
+      "path": "analysis_outputs/g2_100k_sensor_disjoint_20260814/sample_100000_sensor_disjoint.csv",
+      "bytes": 14433370,
+      "sha256": "1D37ECB97C7ECCD98B3FA50CF8537630F6AD335AA78794E65D05929C107B11CE"
+    },
+    "sample_manifest": {
+      "path": "analysis_outputs/g2_100k_sensor_disjoint_20260814/sample_manifest.json",
+      "bytes": 4586,
+      "sha256": "18EA59246192A66DB3BA15A46032CFD31C1B4F4DCA4EE05E3E23CFB78F4BBE71"
+    },
+    "horizon": {
+      "path": "analysis_outputs/g2_100k_sensor_disjoint_20260814/final_sensor_disjoint_100000/horizon_100000_sensor_disjoint.csv",
+      "bytes": 12356521,
+      "sha256": "87591FD8C879CE45F7FC5122FED231B7F0C0D3F8EE648001C236FD5F10ABABCE"
+    },
+    "annual_predictions": {
+      "path": "analysis_outputs/g2_100k_sensor_disjoint_20260814/final_sensor_disjoint_100000/annual_predictions_100000_sensor_disjoint.parquet",
+      "bytes": 5595542,
+      "sha256": "DB0D285C6AA10C4DBA150CF41226FC0C53C1B6E246C7599D6340FFA697109385"
+    },
+    "annual_metrics": {
+      "path": "analysis_outputs/g2_100k_sensor_disjoint_20260814/final_sensor_disjoint_100000/annual_gt_metrics_sensor_disjoint_100000.csv",
+      "bytes": 679,
+      "sha256": "4E9FC4128BB79F835B4C519EABE1420151D8947E56EF587D4CA050D5CCE79DA5"
+    },
+    "figure_sensor_data": {
+      "path": "analysis_outputs/g2_100k_sensor_disjoint_20260814/final_sensor_disjoint_100000/figure_sensor_data_sensor_disjoint_100000.csv",
+      "bytes": 21365555,
+      "sha256": "29CC4D23F951D257A30D2A113FBD2968A2ADED6A860076FA5FEE1AFDE207A2FA"
+    },
+    "final_manifest": {
+      "path": "analysis_outputs/g2_100k_sensor_disjoint_20260814/final_sensor_disjoint_100000/final_manifest.json",
+      "bytes": 3443,
+      "sha256": "696441861B7C2E94477927CACB6AC25888CD79B1898AFA27AC9380BD2150E9C8"
+    }
+  },
+  "validation_metrics": {
+    "all": {
+      "r2": 0.9661083650281692,
+      "rmse_kwh_m2_year": 101.9490882009677,
+      "mae_kwh_m2_year": 60.45549929892631,
+      "mbe_kwh_m2_year": 2.078960725172786
+    },
+    "roof": {
+      "r2": 0.9521382497638262,
+      "rmse_kwh_m2_year": 45.113542020940585
+    },
+    "facade": {
+      "r2": 0.9047986660037707,
+      "rmse_kwh_m2_year": 117.07619088063592
+    }
+  },
+  "restrictions": [
+    "This is a same-site sensor-disjoint application set, not an independent building holdout or sealed test set.",
+    "The annual prediction artifact does not contain 8,760-hour cell series; hourly values must be generated from the frozen model inputs.",
+    "Only sensor_row_index is the frozen cross-artifact identity key.",
+    "Do not use this package for arbitrary address inference or geographic generalization."
+  ]
+}

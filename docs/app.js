@@ -1,5 +1,5 @@
-import { evaluate, faceName, openingRatio } from './calc.js?v=20261023-surrogate';
-import { FacadeViewer } from './facade-viewer.js';
+import { evaluate, faceName, openingRatio } from './calc.js?v=20261024-research-cleanup';
+import { FacadeViewer } from './facade-viewer.js?v=20261024-research-cleanup';
 import { validateCorners } from './facade-geometry.js';
 import { loadFacades, saveFacade, removeFacade } from './facade-store.js';
 
@@ -11,8 +11,9 @@ const PPM = 20;          // 보정 영상 해상도 (px/m), 화면 폭에 맞춰
 const MAX_SRC = 1600;    // 사진 긴 변 최대 px
 
 const S = { params: null, site: null, irr: null, face: null, cellsFrac: {}, img: null, corners: [], cells: null,
-  textures: {}, index: [] };
-const viewer = new FacadeViewer($('#building-canvas'), id => pickFace(id));
+  textures: {}, mode: 'site', publicSite: null, researchOverview: null, researchBuilding: null, researchSensors: [], researchGroup: null,
+  researchMonthly: null, researchAddress: null, analysisGrid: null, candidatePrediction: null };
+const viewer = new FacadeViewer($('#building-canvas'), id => pickFace(id), sensor => showResearchSensor(sensor));
 let siteLoadVersion = 0;
 
 const labelFace = f => `${faceName(f)}${S.site?.source === 'public_api' ? ` · ${f.face_id}` : ''}`;
@@ -36,33 +37,23 @@ function color(v, lo, hi) {
   const i = Math.min(RAMP.length - 2, Math.floor(t)), w = t - i;
   return `rgb(${RAMP[i].map((c, k) => Math.round(c + (RAMP[i + 1][k] - c) * w))})`;
 }
+const CARDINAL_LABELS = ['북측', '북동측', '동측', '남동측', '남측', '남서측', '서측', '북서측'];
+function researchSurfaceLabel(group) {
+  if (group.surface_type === 'Roof') return '지붕';
+  const azimuth = ((Number(group.normal_azimuth_bin_deg) || 0) % 360 + 360) % 360;
+  return `${CARDINAL_LABELS[Math.round(azimuth / 45) % CARDINAL_LABELS.length]} 입면`;
+}
 const range = () => {
   if (!S.irr) return [0, 1];
   const all = Object.values(S.irr.faces).flatMap(f => f.annual);
   return [Math.min(...all), Math.max(...all)];
 };
 
-// ---------- 1. 건물 ----------
-async function loadSite(id) {
-  const version = ++siteLoadVersion;
-  $('#go-photo').disabled = true;
-  const [site, irr] = await Promise.all([
-    getJSON(`data/sites/${id}/site.json`), getJSON(`data/sites/${id}/irradiance.json`)]);
-  if (version !== siteLoadVersion) return;
-  await displaySite(site, irr, version);
-}
-
-async function displaySite(site, irr, version = ++siteLoadVersion) {
-  const id = site.site_id;
-  S.site = site; S.irr = irr;
-  S.face = null; S.cellsFrac = {}; S.textures = {};
-  viewer.setSite(site); viewer.setContext($('#model-context').checked);
-  const b = S.site.building;
-  $('#loaded-building-name').textContent = `${site.source === 'public_api' ? '' : '[가상 데모] '}${site.name} · ${site.address}`;
+function buildingInfo(site) {
+  const b = site.building;
   const heightNote = b.height_source === 'floor_estimate' ? ' (층수로 추정)' : '';
-  const text = v => esc(v ?? '확인 필요');
-  $('#site-info').innerHTML = `
-    <dt>사용승인일</dt><dd>${text(b.approval_date || (b.approval_year ? `${b.approval_year}년` : null))}</dd>
+  const text = value => esc(value ?? '확인 필요');
+  return `<dt>사용승인일</dt><dd>${text(b.approval_date || (b.approval_year ? `${b.approval_year}년` : null))}</dd>
     <dt>주용도</dt><dd>${text(b.use)}</dd>
     <dt>세부 용도</dt><dd>${text(b.other_use)}</dd>
     <dt>층수</dt><dd>지상 ${fmt(b.floors)} / 지하 ${fmt(b.basement_floors)}층</dd>
@@ -70,7 +61,32 @@ async function displaySite(site, irr, version = ++siteLoadVersion) {
     <dt>건축 / 대지면적</dt><dd>${fmt(b.building_area_m2, 1)} / ${fmt(b.land_area_m2, 1)}㎡</dd>
     <dt>높이</dt><dd>${b.height_m ? `${fmt(b.height_m, 1)}m${heightNote}` : '확인 필요'}</dd>
     <dt>구조</dt><dd>${text(b.structure)}</dd>
-    <dt>주변 건물</dt><dd>${S.site.context.length}동 반영</dd>`;
+    <dt>주변 건물</dt><dd>${site.context.length}동 반영</dd>`;
+}
+
+// ---------- 1. 건물 ----------
+async function displaySite(site, irr, version = ++siteLoadVersion) {
+  ++researchVersion; ++researchMonthlyVersion;
+  const id = site.site_id;
+  S.mode = 'site'; S.site = site; S.publicSite = site; S.irr = irr; S.researchBuilding = null; S.researchSensors = []; S.researchGroup = null;
+  S.researchAddress = null;
+  S.researchMonthly = null; $('#research-monthly-panel').hidden = true;
+  S.face = null; S.cellsFrac = {}; S.textures = {};
+  viewer.setSite(site); viewer.setContext($('#model-context').checked);
+  $('#model-draft').checked = false; $('#model-draft').disabled = true;
+  $('#model-heatmap').checked = false; $('#model-heatmap').disabled = true;
+  $('#building-canvas').setAttribute('aria-label', '건물 3D 입면 보기. 드래그 또는 방향키로 회전하고 휠이나 더하기·빼기 키로 확대하세요.');
+  $('#research-legend').hidden = true;
+  $('#building-caption').textContent = '건물을 돌려 보고 사진을 붙일 벽면을 선택하세요.';
+  $('#face-list-title').textContent = '사진을 촬영·적용할 입면을 고르세요';
+  $('#model-context').disabled = false;
+  $('#go-photo').textContent = '선택한 입면 사진 촬영·선택';
+  $('#building-actions').hidden = false;
+  $('#building-result').hidden = false;
+  $('#loaded-building-name').textContent = `${site.name} · ${site.address}`;
+  $('#registry-info-title').hidden = false;
+  $('#site-info').hidden = false;
+  $('#site-info').innerHTML = buildingInfo(site);
   $('#public-data-details').hidden = !!irr;
   $('#go-result').disabled = !irr;
   $('#go-result').textContent = irr ? '사진 없이 데모 결과 보기' : '일사량 분석 연결 전';
@@ -109,6 +125,7 @@ async function displaySite(site, irr, version = ++siteLoadVersion) {
 }
 
 function drawFaceList() {
+  if (S.mode === 'research') { drawResearchGroups(); return; }
   const [lo, hi] = range();
   $('#face-list').innerHTML = S.site.faces.map(f => {
     const v = S.irr ? mean(S.irr.faces[f.face_id].annual) : null;
@@ -169,6 +186,8 @@ $('#model-front').addEventListener('click', () => viewer.faceFront());
 $('#model-zoom-in').addEventListener('click', () => viewer.zoomBy(1.2));
 $('#model-zoom-out').addEventListener('click', () => viewer.zoomBy(1 / 1.2));
 $('#model-context').addEventListener('change', e => viewer.setContext(e.target.checked));
+$('#model-draft').addEventListener('change', e => { viewer.setPoints(e.target.checked); viewer.setDraft(e.target.checked); });
+$('#model-heatmap').addEventListener('change', e => viewer.setHeatmap(e.target.checked));
 $('#remove-photo').addEventListener('click', async () => {
   const siteId = S.site.site_id, id = S.face;
   try { await removeFacade(siteId, id); }
@@ -219,12 +238,180 @@ async function checkSurrogate() {
     if (!r.ok) throw new Error('모델 상태를 확인하지 못했어요. 서버 업데이트·실행 상태를 확인해 주세요.');
     const data = await r.json();
     if (version !== modelStatusVersion || origin !== serverUrl()) return;
-    $('#surrogate-status').textContent = `${data.research_inference_ready ? '연구용 시간별 모델 준비됨' : '연구 모델 자료·실행 환경 확인 필요'} · 실제 주소 분석 보류. ${(data.blockers ?? []).map(b => b.message).join(' ')}`;
+    $('#surrogate-status').textContent = `${data.research_inference_ready ? '연구용 시간별 모델 준비됨' : '연구 모델 자료·실행 환경 확인 필요'} · 연구 대상지 내 주소는 건물 외곽 매칭 후 분석. ${(data.blockers ?? []).map(b => b.message).join(' ')}`;
   } catch (e) {
-    if (version === modelStatusVersion) $('#surrogate-status').textContent = `실제 주소 분석은 실행하지 않았어요. ${e instanceof TypeError ? '연구실 PC 서버에 연결하지 못했어요.' : e.message}`;
+    if (version === modelStatusVersion) $('#surrogate-status').textContent = `모델 상태를 확인하지 못했어요. ${e instanceof TypeError ? '연구실 PC 서버에 연결하지 못했어요.' : e.message}`;
   }
 }
 $('#check-surrogate').addEventListener('click', checkSurrogate);
+
+// Frozen original-research-site data is loaded only after a public address match.
+let researchVersion = 0;
+async function researchJSON(path, signal) {
+  const r = await fetch(`${rememberServer()}${path}`, {signal});
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.detail?.message || `연구 대상지 자료를 불러오지 못했어요 (${r.status}).`);
+  return data;
+}
+async function predictCandidateGrid(siteId, version) {
+  const candidates = S.analysisGrid?.sensors || [];
+  if (!candidates.length) return;
+  $('#surrogate-status').textContent = 'E2c 연간 일사량을 예측하고 있어요…';
+  $('#facade-status').textContent = '분석 위치는 화면에서만 표면 바깥으로 0.05m 띄워 표시하며, 현재 일사량을 예측 중이에요…';
+  try {
+    const result = await researchJSON(
+      `/api/research-site/candidate-grids/${encodeURIComponent(siteId)}/irradiance`,
+      AbortSignal.timeout(180000),
+    );
+    if (version !== researchVersion) return;
+    const byId = new Map(result.items.map(item => [item.candidate_id, item.annual_prediction_kwh_m2_year]));
+    const [lo, hi] = S.researchOverview.annual_prediction_range_kwh_m2_year;
+    for (const sensor of candidates) {
+      const annual = byId.get(sensor.candidate_id);
+      if (!Number.isFinite(annual)) continue;
+      sensor.annual_prediction_kwh_m2_year = annual;
+      sensor.color = color(annual, lo, hi);
+    }
+    S.candidatePrediction = result;
+    $('#model-heatmap').checked = true; $('#model-heatmap').disabled = false; viewer.setHeatmap(true);
+    $('#model-draft').checked = false; viewer.setPoints(false); viewer.setDraft(false);
+    $('#surrogate-status').textContent = `E2c 연간 예측 완료 · 평균 ${fmt(result.annual_mean, 1)} kWh/㎡·년 · 범위 ${fmt(result.annual_min, 1)}–${fmt(result.annual_max, 1)}`;
+    $('#facade-status').textContent = '예측값을 대상 건물 면 컬러맵으로 표시했어요.';
+    $('#building-caption').textContent = `대상 건물은 1.5m 후보 센서의 E2c 연간 예측값을 면별 패치로 표시해요. 주변 건물은 단색이며, 센서 포인트를 켜면 원래 연구 XYZ 위치도 확인할 수 있어요.`;
+  } catch (error) {
+    if (version !== researchVersion) return;
+    $('#surrogate-status').textContent = `E2c 예측을 완료하지 못했어요. ${error.message}`;
+    $('#facade-status').textContent = '분석 위치는 청록 테두리로 표시했어요. 계산 좌표는 유지하고 화면에서만 0.05m 이격했어요.';
+  }
+}
+async function loadResearchBuilding(buildingId, context = {}) {
+  if (!/^[A-Za-z0-9_.-]{1,100}$/.test(buildingId)) throw new Error('연구 건물 ID 형식을 확인해 주세요.');
+  ++siteLoadVersion;
+  const version = ++researchVersion;
+  $('#building-search-note').textContent = `${buildingId} 센서와 연간 예측을 불러오고 있어요…`;
+  {
+    const [overview, building] = await Promise.all([
+      S.researchOverview ? Promise.resolve(S.researchOverview) : researchJSON('/api/research-site', AbortSignal.timeout(20000)),
+      researchJSON(`/api/research-site/buildings/${encodeURIComponent(buildingId)}`, AbortSignal.timeout(20000)),
+    ]);
+    S.researchOverview = overview;
+    const pages = await Promise.all(building.surface_groups.map(group => researchJSON(
+      `/api/research-site/surface-groups/${encodeURIComponent(group.surface_group_id)}/sensors?offset=0&limit=2000`,
+      AbortSignal.timeout(20000))));
+    if (version !== researchVersion) return;
+    const [lo, hi] = S.researchOverview.annual_prediction_range_kwh_m2_year;
+    const sensors = pages.flatMap(page => page.items.map(sensor => ({...sensor,
+      surface_group_id: page.surface_group.surface_group_id, surface_type: page.surface_group.surface_type,
+      color: color(sensor.annual_prediction_kwh_m2_year, lo, hi)})));
+    if (sensors.length !== building.sensor_count) throw new Error('건물 센서 개수가 매핑 패키지와 일치하지 않아요.');
+    S.mode = 'research'; S.site = null; S.publicSite = context.publicSite || null; S.irr = null; S.face = null; S.researchBuilding = building;
+    S.researchSensors = sensors; S.researchGroup = null; S.researchMonthly = null;
+    S.researchAddress = context.address || null; S.analysisGrid = context.analysisGrid || null; S.candidatePrediction = null; ++researchMonthlyVersion;
+    const requestedRadius = Number(context.radiusM);
+    const contextRadiusM = [100, 200, 300].includes(requestedRadius) ? requestedRadius : 200;
+    viewer.setResearch({sensors, site: S.publicSite,
+      anchor_xy: context.match?.public_centroid_xy_m || [0, 0], context_radius_m: contextRadiusM,
+      cell_target_m: S.analysisGrid?.cell_target_m || 1.5,
+      draftSensors: S.analysisGrid?.sensors || []});
+    $('#building-result').hidden = false;
+    $('#building-canvas').setAttribute('aria-label', `${building.building_id} 대상 건물의 연간 일사량 면 컬러맵 3D 보기. 센서 포인트 표시는 선택해서 켤 수 있습니다.`);
+    $('#loaded-building-name').textContent = context.address || '연구 대상지 건물';
+    $('#registry-info-title').hidden = !S.publicSite;
+    $('#site-info').hidden = !S.publicSite;
+    $('#site-info').innerHTML = S.publicSite ? buildingInfo(S.publicSite) : '';
+    $('#public-data-details').hidden = !S.publicSite;
+    $('#building-caption').textContent = S.publicSite
+      ? `대상·반경 ${contextRadiusM}m 주변 건물은 평면 지면 기준이에요. 센서 점은 화면에서만 법선 방향 0.05m 이격하며, 주변 건물을 켜면 크기가 1/5로 줄어요.`
+      : '센서 점을 누르면 연간 예측값을 확인할 수 있어요. 드래그로 회전하고 휠로 확대하세요.';
+    $('#research-legend').hidden = false;
+    $('#research-legend-low').textContent = `${fmt(lo)} kWh/㎡·년`;
+    $('#research-legend-high').textContent = `${fmt(hi)} kWh/㎡·년`;
+    $('#face-list-title').textContent = '입면별 연평균 일사량';
+    $('#model-context').checked = !!S.publicSite; $('#model-context').disabled = !S.publicSite;
+    viewer.setContext(!!S.publicSite);
+    const candidateCount = S.analysisGrid?.sensor_count || 0;
+    $('#model-draft').checked = candidateCount > 0; $('#model-draft').disabled = candidateCount === 0;
+    viewer.setPoints(true); viewer.setDraft(candidateCount > 0);
+    $('#model-heatmap').checked = false; $('#model-heatmap').disabled = true; viewer.setHeatmap(false);
+    $('#model-front').disabled = true; $('#go-photo').disabled = true; $('#remove-photo').hidden = true;
+    $('#building-actions').hidden = true;
+    $('#go-result').disabled = true;
+    $('#irradiance-grid').hidden = true;
+    $('#research-monthly-panel').hidden = true;
+    $('#surrogate-status').textContent = candidateCount
+      ? '분석 좌표·표면 방향·차폐각 생성 완료, E2c 예측을 시작해요.'
+      : '검증된 동일 대상지의 E2c 연간 예측을 표시해요.';
+    drawResearchGroups();
+    $('#facade-status').textContent = S.publicSite
+      ? '기존 연구 일사량과 신규 면 분석 위치를 함께 표시했어요.'
+      : '기존 연구 일사량을 표시했어요.';
+    $('#building-search-note').textContent = '';
+    $('#building-search-note').hidden = true;
+    if (candidateCount && S.publicSite?.site_id) await predictCandidateGrid(S.publicSite.site_id, version);
+  }
+}
+function drawResearchGroups() {
+  if (!S.researchBuilding) return;
+  const [lo, hi] = S.researchOverview.annual_prediction_range_kwh_m2_year;
+  const groups = S.researchBuilding.surface_groups;
+  const buildingMean = mean(S.researchSensors.map(sensor => sensor.annual_prediction_kwh_m2_year));
+  $('#face-list').innerHTML = `<li><button data-research-group="" aria-controls="research-monthly-panel" aria-pressed="${S.researchGroup === null}">
+    <span class="swatch research-all"></span><span>건물 전체 평균<span class="sub">지붕·입면 종합</span></span>
+    <span class="val">${fmt(buildingMean)}<span class="sub">kWh/㎡·년</span></span></button></li>`
+    + groups.map(group => `<li><button data-research-group="${esc(group.surface_group_id)}" aria-controls="research-monthly-panel" aria-pressed="${S.researchGroup === group.surface_group_id}">
+      <span class="swatch" style="background:${color(group.annual_prediction_mean, lo, hi)}"></span>
+      <span>${researchSurfaceLabel(group)}<span class="sub">방위 ${fmt(group.normal_azimuth_bin_deg)}° · 경사 ${fmt(group.normal_tilt_bin_deg)}°</span></span>
+      <span class="val">${fmt(group.annual_prediction_mean)}<span class="sub">kWh/㎡·년</span></span></button></li>`).join('');
+  $('#face-list').querySelectorAll('[data-research-group]').forEach(button => button.addEventListener('click', () => {
+    S.researchGroup = button.dataset.researchGroup || null;
+    viewer.setResearchGroup(S.researchGroup); viewer.selectResearchSensor(null); drawResearchGroups();
+    const selectedGroup = groups.find(group => group.surface_group_id === S.researchGroup);
+    $('#facade-status').textContent = selectedGroup
+      ? `${researchSurfaceLabel(selectedGroup)} · 연평균 ${fmt(selectedGroup.annual_prediction_mean)} kWh/㎡·년`
+      : `건물 전체 평균 · ${fmt(buildingMean)} kWh/㎡·년`;
+    void loadResearchMonthly(selectedGroup || null);
+  }));
+}
+function showResearchSensor(sensor) {
+  $('#facade-status').textContent = `${sensor.surface_type === 'Roof' ? '지붕' : '입면'} 분석 위치 · 연평균 ${fmt(sensor.annual_prediction_kwh_m2_year, 1)} kWh/㎡·년`;
+}
+let researchMonthlyVersion = 0;
+async function loadResearchMonthly(group) {
+  if (!S.researchBuilding) return;
+  const version = ++researchMonthlyVersion;
+  const buildingId = S.researchBuilding.building_id;
+  const groupId = group?.surface_group_id || null;
+  const label = group ? researchSurfaceLabel(group) : '건물 전체';
+  const panel = $('#research-monthly-panel'); panel.hidden = false;
+  $('#research-monthly-title').textContent = `${label} 월평균 일사량`;
+  $('#research-monthly-summary').textContent = 'E2c의 연중 시간별 결과를 월별로 적산하고 선택 표면 전체의 평균을 계산해요.';
+  $('#research-monthly-chart').innerHTML = '';
+  $('#research-monthly-status').textContent = '월별 일사량을 계산하고 있어요…';
+  try {
+    const query = groupId ? `?surface_group_id=${encodeURIComponent(groupId)}` : '';
+    const data = await researchJSON(
+      `/api/research-site/buildings/${encodeURIComponent(buildingId)}/monthly-irradiance${query}`,
+      AbortSignal.timeout(180000),
+    );
+    if (version !== researchMonthlyVersion || S.researchGroup !== groupId) return;
+    S.researchMonthly = data;
+    renderResearchMonthly(data, label);
+  } catch (error) {
+    if (version === researchMonthlyVersion) $('#research-monthly-status').textContent = error instanceof TypeError
+      ? '연구실 PC 서버에 연결하지 못했어요.' : error.message;
+  }
+}
+function renderResearchMonthly(data, label) {
+  const peak = Math.max(...data.series.map(row => row.irradiance_kwh_m2_month), 1);
+  const chart = $('#research-monthly-chart');
+  chart.setAttribute('aria-label', `${label} 1월부터 12월까지 월평균 일사량 막대 차트`);
+  chart.innerHTML = data.series.map(row => {
+    const value = row.irradiance_kwh_m2_month;
+    return `<div class="research-monthly-bar" data-month="${row.month}월" data-value="${fmt(value, 1)}" title="${row.month}월 ${fmt(value, 1)} kWh/㎡·월" style="--bar-height:${Math.max(2, value / peak * 100)}%;--bar-color:${color(value, 0, peak)}"></div>`;
+  }).join('');
+  $('#research-monthly-summary').textContent = `${label} · 연간 합계 ${fmt(data.annual_mean_kwh_m2_year, 1)} kWh/㎡·년`;
+  $('#research-monthly-status').textContent = `${data.weather} · 단위 kWh/㎡·월`;
+}
 
 function renderPublicData(data) {
   $('#data-source').textContent = `조회: ${new Date(data.retrieved_at).toLocaleString('ko-KR')} · ${Object.values(data.sources).join(' / ')}. 미확인 항목은 — 또는 확인 필요로 표시해요.`;
@@ -238,15 +425,16 @@ async function lookupBuilding(query) {
   lookupAbort?.abort(); lookupAbort = new AbortController();
   const timeout = setTimeout(() => lookupAbort.abort(), 180000);
   const button = $('#lookup-submit'); button.disabled = true;
-  $('#site-select').disabled = true; $('#api-url').disabled = true;
+  $('#api-url').disabled = true;
   $('#lookup-choices').hidden = true;
+  $('#building-search-note').hidden = false;
   $('#building-search-note').textContent = '주소·건물 형상·주변 건물을 조회하고 있어요. 건축물대장까지 조회하면 잠시 걸릴 수 있어요.';
   try {
     const r = await fetch(`${rememberServer()}/api/buildings/lookup`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(query), signal:lookupAbort.signal});
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail?.message || `조회 요청에 실패했어요 (${r.status}). 서버를 다시 시작했는지 확인해 주세요.`);
     if (version !== lookupVersion) return;
-    $('#building-search-note').textContent = data.message || '공공 데이터에서 건물을 불러왔어요. 실제 건물의 일사량·경제성 분석은 연결 전이에요.';
+    $('#building-search-note').textContent = data.message || '공공 데이터에서 건물을 불러왔어요. 연구 대상지 기존 건물과 검증 매칭되면 일사량을 연결해요.';
     if (data.status === 'select_building' || data.status === 'select_record') {
       const records = data.status === 'select_record';
       const box = $('#lookup-choices'); box.replaceChildren(); box.hidden = false;
@@ -259,15 +447,25 @@ async function lookupBuilding(query) {
       return;
     }
     if (data.status !== 'ok') throw new Error('조회 결과의 형식을 확인하지 못했어요.');
-    await displaySite(data.site, null); renderPublicData(data);
-    $('#site-select').value = '';
+    if (data.research_match?.status === 'matched') {
+      renderPublicData(data);
+      await loadResearchBuilding(data.research_match.building_id, {
+        address: data.site.address, match: data.research_match, publicSite: data.site,
+        analysisGrid: data.analysis_grid, radiusM: data.radius_m,
+      });
+      $('#building-search-note').textContent = '';
+      $('#building-search-note').hidden = true;
+    } else {
+      await displaySite(data.site, null); renderPublicData(data);
+      if (data.research_match?.message) $('#building-search-note').textContent = `${data.research_match.message} 공공 건물 정보만 표시합니다.`;
+    }
   } catch (e) {
     if (version !== lookupVersion) return;
     const message = e.name === 'AbortError' ? '조회 시간이 초과됐어요. 다시 시도해 주세요.' : e instanceof TypeError ? '연구실 PC에 연결하지 못했어요. 서버와 터널 주소를 확인해 주세요.' : e.message;
     $('#building-search-note').textContent = `${message} 아래에는 이전에 불러온 건물이 표시돼요.`;
   } finally {
     clearTimeout(timeout);
-    if (version === lookupVersion) { button.disabled = false; $('#site-select').disabled = false; $('#api-url').disabled = false; }
+    if (version === lookupVersion) { button.disabled = false; $('#api-url').disabled = false; }
   }
 }
 $('#building-search').addEventListener('submit', e => {
@@ -505,19 +703,12 @@ addEventListener('beforeprint', () => document.querySelectorAll('details').forEa
 // ---------- 시작 ----------
 (async () => {
   try {
-    const [params, index] = await Promise.all([getJSON('params.json'), getJSON('data/sites/index.json')]);
-    S.params = params;
-    S.index = index;
+    S.params = await getJSON('params.json');
     let savedUrl = '';
     try { savedUrl = localStorage.getItem('solarcheck-api-url') || ''; } catch { /* optional */ }
     $('#api-url').value = new URLSearchParams(location.search).get('api') || savedUrl || (location.protocol === 'http:' ? 'http://127.0.0.1:8000' : '');
     if ($('#api-url').value) checkServer();
-    $('#site-select').innerHTML = index.map(s => `<option value="${esc(s.site_id)}">${esc(s.name)} — ${esc(s.address)}</option>`).join('');
-    $('#site-select').addEventListener('change', async e => {
-      try { await loadSite(e.target.value); $('#lookup-choices').hidden = true; $('#building-search-note').textContent = '아래는 가상 데모 건물이에요. 주소 자동 조회 결과와 구분해 주세요.'; }
-      catch (err) { $('#building-search-note').textContent = err.message; }
-    });
-    await loadSite(index[0].site_id);
+    $('#building-result').hidden = true;
     $('#lookup-submit').disabled = false;
     show('site');
   } catch (err) {

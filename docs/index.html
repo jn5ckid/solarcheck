@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>솔라체크 · 외피 태양광 사전진단</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="style.css?v=20261023-surrogate">
-<script type="module" src="app.js?v=20261023-surrogate"></script>
+<link rel="stylesheet" href="style.css?v=20261024-monthly-facade">
+<script type="module" src="app.js?v=20261024-research-cleanup"></script>
 </head>
 <body>
 <header class="top">
@@ -34,12 +34,11 @@
       <label class="field">주변 조회 반경<select id="lookup-radius"><option value="100">100m</option><option value="200" selected>200m</option><option value="300">300m</option></select></label>
       <button id="lookup-submit" class="primary" type="submit" disabled>주소로 자동 조회</button>
     </form>
-    <p id="building-search-note" class="hint" role="status">주소를 입력하면 공공 데이터에서 건물과 주변 형상을 불러와요. 현재 아래는 가상 데모예요.</p>
+    <p id="building-search-note" class="hint" role="status">연구 대상지 내부의 도로명주소를 입력하면 건축물대장 정보와 연구 일사량을 함께 불러와요.</p>
     <div id="lookup-choices" class="lookup-choices" hidden></div>
-    <label class="field">예제 건물로 체험하기
-      <select id="site-select"></select>
-    </label>
+    <div id="building-result" hidden>
     <h2 id="loaded-building-name"></h2>
+    <h3 id="registry-info-title" class="info-title">건축물대장 정보</h3>
     <dl id="site-info" class="info"></dl>
     <div id="public-data-details" hidden>
       <details><summary>조회 출처와 확인할 사항</summary><p id="data-source" class="hint"></p><ul id="lookup-warnings"></ul></details>
@@ -47,18 +46,27 @@
     </div>
     <figure class="building-model">
       <canvas id="building-canvas" tabindex="0" aria-label="건물 3D 입면 보기. 드래그 또는 방향키로 회전하고 휠이나 더하기·빼기 키로 확대하세요."></canvas>
-      <figcaption>건물을 돌려 보고 사진을 붙일 벽면을 선택하세요.</figcaption>
+      <figcaption id="building-caption">건물을 돌려 보고 사진을 붙일 벽면을 선택하세요.</figcaption>
+      <div id="research-legend" class="research-legend" hidden><span id="research-legend-low"></span><i></i><span id="research-legend-high"></span></div>
       <div class="model-tools">
         <button id="model-reset" class="ghost" type="button">전체 보기</button>
         <button id="model-front" class="ghost" type="button" disabled>선택 입면 정면</button>
         <button id="model-zoom-in" class="ghost" type="button" aria-label="건물 확대">+</button>
         <button id="model-zoom-out" class="ghost" type="button" aria-label="건물 축소">−</button>
         <label><input id="model-context" type="checkbox"> 주변 건물</label>
+        <label><input id="model-heatmap" type="checkbox" disabled> 일사량 면 컬러맵</label>
+        <label><input id="model-draft" type="checkbox" disabled> 센서 포인트</label>
       </div>
     </figure>
     <p id="facade-status" class="hint" role="status">입면 사진은 건물·방향별로 이 기기의 브라우저에 저장돼요.</p>
-    <h2>사진을 촬영·적용할 입면을 고르세요</h2>
+    <h2 id="face-list-title">사진을 촬영·적용할 입면을 고르세요</h2>
     <ul id="face-list" class="faces"></ul>
+    <section id="research-monthly-panel" class="research-monthly" hidden>
+      <h2 id="research-monthly-title">입면별 월평균 일사량</h2>
+      <p id="research-monthly-summary" class="hint"></p>
+      <div id="research-monthly-chart" class="research-monthly-chart" role="img" aria-label="1월부터 12월까지 월평균 일사량 막대 차트"></div>
+      <p id="research-monthly-status" class="hint" role="status"></p>
+    </section>
     <details id="irradiance-grid" hidden>
       <summary id="irradiance-grid-title">선택 입면의 격자별 연간 일사량</summary>
       <p id="irradiance-grid-note" class="hint"></p>
@@ -66,11 +74,12 @@
       <output id="irradiance-cell-value" class="hint" aria-live="polite"></output>
     </details>
     <p id="surrogate-status" class="hint" role="status">실제 주소의 분석 가능 여부는 연구실 PC 연결 후 확인해요.</p>
-    <div class="actions">
+    <div id="building-actions" class="actions">
       <button id="go-photo" class="primary" disabled>선택한 입면 사진 촬영·선택</button>
       <button id="remove-photo" class="ghost" hidden>선택한 입면 사진 지우기</button>
       <button id="go-result" class="ghost">사진 없이 결과 보기</button>
       <button id="check-surrogate" class="ghost" type="button">일사량 모델 상태 확인</button>
+    </div>
     </div>
   </section>
 

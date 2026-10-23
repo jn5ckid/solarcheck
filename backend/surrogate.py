@@ -28,8 +28,8 @@ LIMITATIONS = [
     '반사광·비등방 확산·수목·발코니와 블록 모델 밖의 장애물은 정확히 반영하지 못해요.',
 ]
 ADDRESS_BLOCKERS = [
-    {'code': 'MODEL_GEOREFERENCE_REQUIRED',
-     'message': '연구 모델 XYZ와 실제 위경도를 잇는 기준점·진북 회전각·높이 기준이 없어 주소 분석을 보류해요.'},
+    {'code': 'OUTSIDE_FROZEN_RESEARCH_SITE_BLOCKED',
+     'message': '주소 분석은 공공 건물 외곽이 고정 연구 건물과 검증 매칭되는 경우만 허용해요.'},
     {'code': 'APPLICATION_DOMAIN_UNVERIFIED',
      'message': '새 주소의 형상·기상 조건에서 적용 가능 범위를 검증해야 해요. 서울 기상 자료를 다른 지역에 자동 적용하지 않아요.'},
 ]
@@ -79,6 +79,7 @@ def status():
             checks[key] = 'unreadable'
     ready = all(v == 'verified' for v in checks.values()) and importlib.util.find_spec('torch') is not None
     return {'model': 'E2c', 'research_inference_ready': ready, 'address_inference_ready': False,
+            'same_site_address_matching': True,
             'artifacts': checks, 'runtime_ready': importlib.util.find_spec('torch') is not None,
             'output_unit': 'W/m2', 'annual_unit': 'kWh/m2/year', 'hours': 8760,
             'time_axis': '2021-01-01 00:30 KST + h hours (TMYx reference year)',
@@ -135,6 +136,13 @@ def predict_research_sensors(xyz, normals, horizons_deg, *, coordinate_frame):
     This internal/offline interface is deliberately not a public raw-input API.
     Never pass building-centred GIS coordinates or invent a z datum here.
     """
+    return predict_research_sensors_at_hours(
+        xyz, normals, horizons_deg, range(8760), coordinate_frame=coordinate_frame
+    )
+
+
+def predict_research_sensors_at_hours(xyz, normals, horizons_deg, hour_indices, *, coordinate_frame):
+    """Return W/m² for requested frozen TMYx hour indices in request order."""
     if coordinate_frame != 'original-research-local':
         raise ValueError('A verified original research coordinate frame is required')
     xyz, normals, horizons_deg = [np.asarray(a, dtype=np.float64) for a in (xyz, normals, horizons_deg)]
@@ -147,31 +155,62 @@ def predict_research_sensors(xyz, normals, horizons_deg, *, coordinate_frame):
         raise ValueError('Normals must be unit vectors')
     if (horizons_deg < 0).any() or (horizons_deg > 90).any():
         raise ValueError('Horizon elevations must be in [0, 90] degrees')
+    requested = np.asarray(list(hour_indices))
+    if requested.ndim != 1 or not 1 <= len(requested) <= 8760:
+        raise ValueError('Expected 1..8760 hour indices')
+    if not np.issubdtype(requested.dtype, np.integer):
+        try:
+            integer_requested = requested.astype(np.int64)
+        except (TypeError, ValueError, OverflowError) as error:
+            raise ValueError('Hour indices must be integers') from error
+        if not np.equal(requested, integer_requested).all():
+            raise ValueError('Hour indices must be integers')
+        requested = integer_requested
+    else:
+        requested = requested.astype(np.int64, copy=False)
+    if (requested < 0).any() or (requested >= 8760).any() or len(np.unique(requested)) != len(requested):
+        raise ValueError('Hour indices must be unique values in [0, 8759]')
     model, axes, solar = load()
     normalized = np.column_stack([(xyz[:, i] - axes[k]['min']) / axes[k]['scale']
                                   for i, k in enumerate(('Px', 'Py', 'Pz'))]).astype(np.float32)
     if (normalized < 0).any() or (normalized > 1).any():
         raise ValueError('Sensor is outside the frozen train XYZ range; extrapolation is blocked')
     import torch
-    day = np.array([r['is_daytime'].lower() == 'true' for r in solar])
-    hours = np.flatnonzero(day)
-    if len(hours) != 4434:
+    full_day = np.array([r['is_daytime'].lower() == 'true' for r in solar])
+    if int(full_day.sum()) != 4434:
         raise SurrogateUnavailable('기상 자료의 주간 시간수가 달라요.')
+    daytime_positions = np.flatnonzero(full_day[requested])
+    hours = requested[daytime_positions]
+    result = np.zeros((n, len(requested)), dtype=np.float32)
+    if not len(hours):
+        return result
     angles = np.array([[float(solar[h][k]) for k in INDEPENDENT[4:]] for h in hours], dtype=np.float32)
     weather = np.array([[float(solar[h][k]) for k in ('dni', 'dhi')] for h in hours], dtype=np.float32)
     altitude = np.array([float(solar[h]['solar_altitude_deg']) for h in hours])
     azimuth = np.array([float(solar[h]['solar_azimuth_deg']) for h in hours])
-    result = np.zeros((n, 8760), dtype=np.float32)
-    # Bound temporary memory independently of facade size. Night outputs are the model's exact zero gate.
+    # Batch sensor-hour pairs so dense same-site grids do not require one model call per sensor.
+    # 32,768 rows keeps intermediate activations bounded while preserving the original float32 contract.
     with torch.inference_mode():
-        for i in range(n):
-            independent = np.column_stack([np.broadcast_to(normalized[i], (len(hours), 3)),
-                                           (hours / 8759).astype(np.float32), angles]).astype(np.float32)
-            raw = np.column_stack([np.broadcast_to(normals[i].astype(np.float32), (len(hours), 3)), weather,
-                                   np.broadcast_to((horizons_deg[i] / 90).astype(np.float32), (len(hours), 8)),
-                                   soft_visibility(horizons_deg[i:i+1], altitude, azimuth).ravel()]).astype(np.float32)
+        visible = soft_visibility(horizons_deg, altitude, azimuth)
+        hour_fraction = (hours / 8759).astype(np.float32)
+        flat = np.empty(n * len(hours), dtype=np.float32)
+        for start in range(0, len(flat), 32768):
+            stop = min(start + 32768, len(flat))
+            pair = np.arange(start, stop, dtype=np.int64)
+            sensor_index, hour_position = np.divmod(pair, len(hours))
+            independent = np.column_stack([
+                normalized[sensor_index], hour_fraction[hour_position], angles[hour_position],
+            ]).astype(np.float32)
+            raw = np.column_stack([
+                normals[sensor_index].astype(np.float32), weather[hour_position],
+                (horizons_deg[sensor_index] / 90).astype(np.float32),
+                visible[sensor_index, hour_position],
+            ]).astype(np.float32)
             raw[:, 3:5] /= 1000.0
-            result[i, hours] = model(torch.from_numpy(independent), torch.from_numpy(raw)).numpy().ravel()
+            flat[start:stop] = model(
+                torch.from_numpy(independent), torch.from_numpy(raw)
+            ).numpy().ravel()
+        result[:, daytime_positions] = flat.reshape(n, len(hours))
     if not np.isfinite(result).all() or (result < 0).any():
         raise SurrogateUnavailable('모델이 유효하지 않은 일사량을 반환했어요.')
     return result

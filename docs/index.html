@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>솔라체크 · 외피 태양광 사전진단</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="style.css?v=20261023-ui-cleanup">
-<script type="module" src="app.js?v=20261023-ui-cleanup"></script>
+<link rel="stylesheet" href="style.css?v=20261023-photo-options">
+<script type="module" src="app.js?v=20261023-photo-options"></script>
 </head>
 <body>
 <header class="top">
@@ -57,10 +57,10 @@
       </div>
     </figure>
     <p id="facade-status" class="hint" role="status">입면 사진은 건물·방향별로 이 기기의 브라우저에 저장돼요.</p>
-    <h2>사진을 붙일 입면을 고르세요</h2>
+    <h2>사진을 촬영·적용할 입면을 고르세요</h2>
     <ul id="face-list" class="faces"></ul>
     <div class="actions">
-      <button id="go-photo" class="primary" disabled>선택한 입면 사진 고르기</button>
+      <button id="go-photo" class="primary" disabled>선택한 입면 사진 촬영·선택</button>
       <button id="remove-photo" class="ghost" hidden>선택한 입면 사진 지우기</button>
       <button id="go-result" class="ghost">사진 없이 결과 보기</button>
     </div>
@@ -69,9 +69,15 @@
   <section id="step-photo" class="step" hidden>
     <h1 id="photo-title">입면 촬영</h1>
     <p id="photo-hint" class="hint">입면 전체가 보이게 정면에서 찍어 주세요.</p>
-    <label class="primary file">사진 찍기 · 고르기
-      <input id="photo-input" type="file" accept="image/*" capture="environment">
-    </label>
+    <div class="photo-sources">
+      <label class="primary file">사진 촬영
+        <input id="photo-camera" type="file" accept="image/*" capture="environment" aria-describedby="photo-source-hint">
+      </label>
+      <label class="ghost file">기존 사진 선택
+        <input id="photo-input" type="file" accept="image/*">
+      </label>
+    </div>
+    <p id="photo-source-hint" class="hint">휴대폰에서는 후면 카메라로 촬영할 수 있어요. 기기·브라우저에 따라 촬영 버튼도 파일 선택 화면을 열 수 있어요.</p>
     <div id="corner-box" hidden>
       <p id="corner-hint" class="hint"></p>
       <canvas id="photo-canvas" aria-label="입면 사진. 네 모서리를 차례로 누르세요"></canvas>

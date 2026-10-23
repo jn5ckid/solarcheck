@@ -85,6 +85,7 @@ button, .file { font: inherit; font-weight: 700; border-radius: 10px; padding: 1
 .file { display: block; }
 .file input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .file:focus-within { outline: 3px solid var(--sun); }
+.photo-sources { display: grid; gap: 8px; }
 :focus-visible { outline: 3px solid var(--sun); outline-offset: 2px; }
 
 .hint { color: var(--muted); font-size: .9rem; margin: 8px 0; }

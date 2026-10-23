@@ -130,7 +130,7 @@ function pickFace(id) {
   $('#model-front').disabled = false;
   $('#remove-photo').hidden = !S.textures[id];
   viewer.select(id);
-  $('#go-photo').textContent = `${labelFace(face())} 사진 ${S.textures[id] ? '바꾸기' : '고르기'}`;
+  $('#go-photo').textContent = `${labelFace(face())} 사진 ${S.textures[id] ? '촬영·교체' : '촬영·선택'}`;
 }
 
 $('#model-reset').addEventListener('click', () => viewer.reset());
@@ -231,7 +231,7 @@ const CORNERS = ['왼쪽 위', '오른쪽 위', '오른쪽 아래', '왼쪽 아�
 
 function openPhoto() {
   const f = face();
-  $('#photo-title').textContent = `${labelFace(f)} 촬영`;
+  $('#photo-title').textContent = `${labelFace(f)} 사진`;
   $('#photo-hint').textContent = `건물 밖에서 ${labelFace(f)}을 정면으로 보고, 벽 전체가 들어오게 찍어 주세요.`;
   S.img = null; S.rectImg = null; S.corners = [];
   S.cells = S.cellsFrac[S.face] ? [...S.cellsFrac[S.face]] : null;
@@ -240,12 +240,14 @@ function openPhoto() {
   $('#photo-reset').hidden = true;
   $('#photo-done').disabled = true;
   $('#photo-input').value = '';
+  $('#photo-camera').value = '';
   show('photo');
 }
 
-$('#photo-input').addEventListener('change', async e => {
+async function loadPhoto(e) {
   const file = e.target.files[0];
   if (!file) return;
+  e.target.value = '';
   S.rectImg = null;
   $('#photo-done').disabled = true;
   $('#photo-reset').hidden = true;
@@ -266,7 +268,9 @@ $('#photo-input').addEventListener('change', async e => {
   $('#corner-box').hidden = false;
   $('#photo-done').disabled = true;
   drawCorners();
-});
+}
+$('#photo-input').addEventListener('change', loadPhoto);
+$('#photo-camera').addEventListener('change', loadPhoto);
 
 function drawCorners() {
   const cv = $('#photo-canvas'), g = cv.getContext('2d');

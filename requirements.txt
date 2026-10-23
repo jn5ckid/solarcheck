@@ -1,3 +1,6 @@
 numpy
 shapely
 geopandas
+fastapi
+uvicorn
+python-multipart

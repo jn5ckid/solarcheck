@@ -5,3 +5,11 @@ raw/
 __pycache__/
 .venv/
 *.epw
+*.py[cod]
+.env.*
+!.env.example
+models/
+data/
+uploads/
+outputs/
+tools/

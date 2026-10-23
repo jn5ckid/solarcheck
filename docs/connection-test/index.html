@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>솔라체크 · 연결 시험</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f4f7f4; color: #18362b; font-family: system-ui, sans-serif; }
+    main { max-width: 620px; margin: 48px auto; padding: 28px; }
+    h1 { margin-bottom: 8px; font-size: 36px; }
+    p { line-height: 1.7; }
+    form { margin-top: 28px; }
+    label { display: block; margin: 20px 0 8px; font-weight: 600; }
+    input { width: 100%; padding: 12px; border: 1px solid #aabbb0; border-radius: 8px; background: white; font: inherit; }
+    small { display: block; margin-top: 8px; color: #4d6458; line-height: 1.6; }
+    button { margin-top: 24px; width: 100%; padding: 14px; border: 0; border-radius: 8px; color: white; background: #17613f; font: inherit; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: wait; }
+    :focus-visible { outline: 3px solid #b77713; outline-offset: 3px; }
+    pre { padding: 18px; background: white; border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
+    @media (max-width: 600px) { main { margin: 16px auto; padding: 20px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>솔라체크</h1>
+    <p>주소와 사진을 연구실 PC로 보내 연결을 확인합니다.<br>이 화면은 연결 시험용이며 실제 분석 결과를 제공하지 않습니다.</p>
+    <form id="form">
+      <label for="api-base">분석 서버 주소</label>
+      <input id="api-base" type="url" value="http://127.0.0.1:8000" required>
+      <small>외부에서 시험할 때는 연구실 PC에서 발급받은 HTTPS 터널 주소를 입력하세요.</small>
+      <label for="address">건물 주소</label>
+      <input id="address" name="address" placeholder="건물 도로명 주소" maxlength="300" required>
+      <label for="photo">입면 사진</label>
+      <input id="photo" name="photo" type="file" accept="image/*" required>
+      <button type="submit">연구실 PC로 전송</button>
+    </form>
+    <h2>연결 결과</h2>
+    <pre id="result" role="status" aria-live="polite">아직 전송하지 않았습니다.</pre>
+  </main>
+  <script>
+    const form = document.querySelector("#form");
+    const result = document.querySelector("#result");
+    const button = form.querySelector("button");
+    const apiFromLink = new URLSearchParams(location.search).get("api");
+    if (apiFromLink) document.querySelector("#api-base").value = apiFromLink;
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      button.disabled = true;
+      result.textContent = "연구실 PC로 전송 중...";
+      try {
+        const api = new URL(document.querySelector("#api-base").value.trim());
+        if (!["http:", "https:"].includes(api.protocol)) {
+          throw new Error("HTTP 또는 HTTPS 서버 주소를 입력하세요.");
+        }
+        if (location.protocol === "https:" && api.protocol !== "https:") {
+          throw new Error("이 화면에서는 HTTPS 터널 주소를 입력해야 합니다.");
+        }
+        const endpoint = api.href.replace(/\/+$/, "") + "/analyze";
+        const response = await fetch(endpoint, {
+          method: "POST",
+          body: new FormData(form),
+          signal: AbortSignal.timeout(30000)
+        });
+        if (!response.ok) throw new Error(`서버 오류: ${response.status}`);
+        result.textContent = JSON.stringify(await response.json(), null, 2);
+      } catch (error) {
+        result.textContent = `연결 실패: ${error.message}\n서버 실행 상태, 서버 주소, CORS 설정을 확인하세요.`;
+      } finally {
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

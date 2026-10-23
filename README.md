@@ -5,6 +5,19 @@
 - `prep/` 사전 계산 (Python): GIS 윤곽 → 블록·분석면 → 센서 격자 → 지평선 → 일사
 - `docs/` 웹 (GitHub Pages 배포 폴더): 건물 선택 → 입면 촬영·원근 보정·칸 편집 → 산정·판정
 - `tests/` 산정 로직 테스트
+- `backend/` 연구실 PC에서 실행하는 FastAPI 연결 시험 서버
+- `docs/connection-test/` 주소·사진을 연구실 PC로 전송하는 연결 시험 화면
+
+## 연구실 PC 연결 시험
+
+기존 사전진단 화면은 유지하고, 서버 왕복 통신 시험은 별도 화면에서 진행합니다.
+
+- 기존 화면: https://jn5ckid.github.io/solarcheck/
+- 연결 시험: https://jn5ckid.github.io/solarcheck/connection-test/
+- 실행 및 외부 접속 안내: [CONNECTION_TEST.md](CONNECTION_TEST.md)
+
+연결 시험 서버는 업로드 접수만 응답하며 실제 GIS·AI 분석은 아직 연결하지 않았습니다.
+기존 화면의 사전 계산 결과와 연결 시험 서버의 응답은 서로 별개입니다.
 
 ## 실행
 

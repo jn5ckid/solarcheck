@@ -1,4 +1,7 @@
 import { evaluate, faceName } from './calc.js';
+import { FacadeViewer } from './facade-viewer.js';
+import { validateCorners } from './facade-geometry.js';
+import { loadFacades, saveFacade, removeFacade } from './facade-store.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
@@ -7,7 +10,10 @@ const mean = a => a.reduce((s, x) => s + x, 0) / a.length;
 const PPM = 20;          // 보정 영상 해상도 (px/m), 화면 폭에 맞춰 줄인다
 const MAX_SRC = 1600;    // 사진 긴 변 최대 px
 
-const S = { params: null, site: null, irr: null, face: null, cellsFrac: {}, img: null, corners: [], cells: null };
+const S = { params: null, site: null, irr: null, face: null, cellsFrac: {}, img: null, corners: [], cells: null,
+  textures: {}, index: [] };
+const viewer = new FacadeViewer($('#building-canvas'), id => pickFace(id));
+let siteLoadVersion = 0;
 
 // ---------- 공통 ----------
 async function getJSON(url) {
@@ -19,6 +25,7 @@ function show(step) {
   for (const id of ['site', 'photo', 'result']) $(`#step-${id}`).hidden = id !== step;
   document.querySelectorAll('.steps li').forEach(li => li.classList.toggle('on', li.dataset.step === step));
   scrollTo(0, 0);
+  if (step === 'site') requestAnimationFrame(() => viewer.draw());
 }
 // 일사량 색: 음영(회청) → 햇빛(노랑) → 강한 일사(주황)
 const RAMP = [[96, 112, 120], [150, 160, 150], [242, 179, 0], [232, 110, 30]];
@@ -34,9 +41,14 @@ const range = () => {
 
 // ---------- 1. 건물 ----------
 async function loadSite(id) {
-  [S.site, S.irr] = await Promise.all([
+  const version = ++siteLoadVersion;
+  $('#go-photo').disabled = true;
+  const [site, irr] = await Promise.all([
     getJSON(`data/sites/${id}/site.json`), getJSON(`data/sites/${id}/irradiance.json`)]);
-  S.face = null; S.cellsFrac = {};
+  if (version !== siteLoadVersion) return;
+  S.site = site; S.irr = irr;
+  S.face = null; S.cellsFrac = {}; S.textures = {};
+  viewer.setSite(site); viewer.setContext($('#model-context').checked);
   const b = S.site.building, age = new Date().getFullYear() - b.approval_year;
   $('#site-info').innerHTML = `
     <dt>사용승인</dt><dd>${b.approval_year ? `${b.approval_year}년 · ${age}년 경과${age >= 15 ? '<span class="tag">노후</span>' : ''}` : '확인 필요'}</dd>
@@ -46,6 +58,34 @@ async function loadSite(id) {
   drawPlan();
   drawFaceList();
   $('#go-photo').disabled = true;
+  $('#model-front').disabled = true;
+  $('#remove-photo').hidden = true;
+  $('#facade-status').textContent = '저장된 입면 사진을 확인하고 있어요.';
+  let stored = [];
+  let storageAvailable = true;
+  try { stored = await loadFacades(id); }
+  catch { storageAvailable = false; }
+  const restored = await Promise.all(stored.map(async record => {
+    const f = site.faces.find(f => f.face_id === record.faceId && f.type === 'facade');
+    if (!f || !Array.isArray(record.cells) || record.cells.length !== f.ns * f.nt
+      || record.cells.some(x => !Number.isFinite(x) || x < 0 || x > 1)
+      || !/^data:image\/(jpeg|png);base64,/.test(record.dataUrl)) return null;
+    try {
+      const image = new Image(); image.src = record.dataUrl; await image.decode();
+      return {record, image};
+    } catch { return null; }
+  }));
+  if (version !== siteLoadVersion) return;
+  for (const entry of restored.filter(Boolean)) {
+    S.textures[entry.record.faceId] = {image: entry.image, dataUrl: entry.record.dataUrl};
+    S.cellsFrac[entry.record.faceId] = entry.record.cells;
+  }
+  viewer.setPhotos(S.textures); drawFaceList();
+  const count = Object.keys(S.textures).length;
+  $('#facade-status').textContent = !storageAvailable ? '사진 저장소를 사용할 수 없어 현재 화면에만 사진을 입힐 수 있어요.'
+    : count ? `이 건물의 입면 ${count}곳에 저장된 사진을 불러왔어요.`
+      : '입면을 고르고 사진의 네 모서리를 지정하면 해당 벽면에 입혀요. 사진은 이 기기에 저장돼요.';
+  $('#go-result').textContent = count ? '진단 결과 보기' : '사진 없이 결과 보기';
 }
 
 function drawPlan() {
@@ -81,8 +121,9 @@ function drawFaceList() {
     const roof = f.type === 'roof';
     const sub = roof ? `${fmt(f.area_m2)}㎡ · 정사영상 분석 예정`
       : `폭 ${fmt(f.width_m, 1)}m · ${S.cellsFrac[f.face_id] ? '사진 반영됨' : '사진 없음'}`;
-    return `<li><button data-face="${f.face_id}" aria-pressed="${S.face === f.face_id}" ${roof ? 'disabled' : ''}>
-      <span class="swatch" style="background:${color(v, lo, hi)}"></span>
+    const texture = S.textures[f.face_id];
+    return `<li><button class="${texture ? 'has-photo' : ''}" data-face="${f.face_id}" aria-pressed="${S.face === f.face_id}" ${roof ? 'disabled' : ''}>
+      ${texture ? `<img class="face-thumbnail" src="${esc(texture.dataUrl)}" alt="">` : `<span class="swatch" style="background:${color(v, lo, hi)}"></span>`}
       <span>${faceName(f)}<span class="sub">${sub}</span></span>
       <span class="val">${fmt(v)}<span class="sub">kWh/㎡·년</span></span></button></li>`;
   }).join('');
@@ -93,7 +134,40 @@ function pickFace(id) {
   S.face = id;
   drawPlan(); drawFaceList();
   $('#go-photo').disabled = false;
+  $('#model-front').disabled = false;
+  $('#remove-photo').hidden = !S.textures[id];
+  viewer.select(id);
+  $('#go-photo').textContent = `${faceName(face())} 사진 ${S.textures[id] ? '바꾸기' : '고르기'}`;
 }
+
+$('#model-reset').addEventListener('click', () => viewer.reset());
+$('#model-front').addEventListener('click', () => viewer.faceFront());
+$('#model-zoom-in').addEventListener('click', () => viewer.zoomBy(1.2));
+$('#model-zoom-out').addEventListener('click', () => viewer.zoomBy(1 / 1.2));
+$('#model-context').addEventListener('change', e => viewer.setContext(e.target.checked));
+$('#remove-photo').addEventListener('click', async () => {
+  const siteId = S.site.site_id, id = S.face;
+  try { await removeFacade(siteId, id); }
+  catch { $('#facade-status').textContent = '저장된 사진을 지우지 못했어요. 다시 시도해 주세요.'; return; }
+  if (S.site.site_id !== siteId) return;
+  delete S.textures[id]; delete S.cellsFrac[id];
+  viewer.setPhotos(S.textures); drawFaceList(); pickFace(id);
+  $('#go-result').textContent = Object.keys(S.textures).length ? '진단 결과 보기' : '사진 없이 결과 보기';
+  $('#facade-status').textContent = `${faceName(face())} 사진을 지웠어요.`;
+});
+
+$('#building-search').addEventListener('submit', async e => {
+  e.preventDefault();
+  const query = $('#building-query').value.trim().replace(/\s/g, '').toLowerCase();
+  const found = query && S.index.find(s => `${s.name}${s.address}`.replace(/\s/g, '').toLowerCase().includes(query));
+  if (!found) {
+    $('#building-search-note').textContent = '일치하는 등록 건물이 없어요. 실제 주소 자동 조회는 연결 전이며, 아래에서 데모 건물을 선택해 시험할 수 있어요.';
+    return;
+  }
+  $('#site-select').value = found.site_id;
+  try { await loadSite(found.site_id); $('#building-search-note').textContent = `${found.name}을 불러왔어요. 데모 건물은 가상 형상이에요.`; }
+  catch (error) { $('#building-search-note').textContent = `건물을 불러오지 못했어요: ${error.message}`; }
+});
 
 // ---------- 2. 입면 사진 ----------
 const face = () => S.site.faces.find(f => f.face_id === S.face);
@@ -103,7 +177,7 @@ function openPhoto() {
   const f = face();
   $('#photo-title').textContent = `${faceName(f)} 촬영`;
   $('#photo-hint').textContent = `건물 밖에서 ${faceName(f)}을 정면으로 보고, 벽 전체가 들어오게 찍어 주세요.`;
-  S.img = null; S.corners = [];
+  S.img = null; S.rectImg = null; S.corners = [];
   S.cells = S.cellsFrac[S.face] ? [...S.cellsFrac[S.face]] : null;
   $('#corner-box').hidden = true;
   $('#grid-box').hidden = true;
@@ -116,11 +190,20 @@ function openPhoto() {
 $('#photo-input').addEventListener('change', async e => {
   const file = e.target.files[0];
   if (!file) return;
-  const bmp = await createImageBitmap(file);
+  S.rectImg = null;
+  $('#photo-done').disabled = true;
+  $('#photo-reset').hidden = true;
+  $('#corner-box').hidden = true;
+  $('#grid-box').hidden = true;
+  if (file.size > 20 * 1024 * 1024) { $('#photo-hint').textContent = '20MB 이하의 사진을 선택해 주세요.'; return; }
+  let bmp;
+  try { bmp = await createImageBitmap(file); }
+  catch { $('#photo-hint').textContent = '사진을 읽지 못했어요. JPG 또는 PNG 사진을 선택해 주세요.'; return; }
   const k = Math.min(1, MAX_SRC / Math.max(bmp.width, bmp.height));
   const c = document.createElement('canvas');
   c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
   c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  bmp.close();
   S.img = c; S.corners = [];
   S.cells = null;
   $('#grid-box').hidden = true;
@@ -185,6 +268,10 @@ function homography(from, to) {
 
 function rectify() {
   const f = face();
+  if (!validateCorners(S.corners)) {
+    $('#corner-hint').textContent = '왼쪽 위 → 오른쪽 위 → 오른쪽 아래 → 왼쪽 아래 순서로 모서리를 다시 지정해 주세요.';
+    return;
+  }
   let W = Math.round(f.width_m * PPM), H = Math.round(f.height_m * PPM);
   const k = Math.min(1, 720 / W, 960 / H);
   W = Math.round(W * k); H = Math.round(H * k);
@@ -238,7 +325,28 @@ $('#rect-canvas').addEventListener('click', e => {
   drawGrid();
 });
 
-$('#photo-done').addEventListener('click', () => { S.cellsFrac[S.face] = S.cells; showResult(); });
+$('#photo-done').addEventListener('click', async () => {
+  if (!S.rectImg || !S.cells) return;
+  const button = $('#photo-done'), siteId = S.site.site_id, faceId = S.face;
+  button.disabled = true;
+  try {
+    // Use the clean rectified photo, not the yellow installation-mask overlay.
+    const canvas = document.createElement('canvas'); canvas.width = S.rectImg.width; canvas.height = S.rectImg.height;
+    canvas.getContext('2d').putImageData(S.rectImg, 0, 0);
+    const dataUrl = canvas.toDataURL('image/jpeg', .9), cells = [...S.cells];
+    const image = new Image(); image.src = dataUrl; await image.decode();
+    S.cellsFrac[faceId] = cells; S.textures[faceId] = {image, dataUrl};
+    let saved = true;
+    try { await saveFacade(siteId, faceId, {dataUrl, cells}); } catch { saved = false; }
+    viewer.setPhotos(S.textures); drawPlan(); drawFaceList(); pickFace(faceId);
+    $('#go-result').textContent = '진단 결과 보기';
+    $('#facade-status').textContent = saved ? `${faceName(face())}에 사진을 입혔어요. 이 기기의 브라우저에 저장했어요.`
+      : '사진을 입혔지만 브라우저에 저장하지 못했어요. 새로고침하면 사진이 사라질 수 있어요.';
+    show('site'); viewer.faceFront();
+    $('#building-canvas').scrollIntoView({block: 'center', behavior: 'instant'});
+  } catch { $('#photo-hint').textContent = '사진을 입히지 못했어요. 다른 사진으로 다시 시도해 주세요.'; }
+  finally { button.disabled = false; }
+});
 $('#photo-back').addEventListener('click', () => { drawFaceList(); show('site'); });
 
 // ---------- 3. 결과 ----------
@@ -287,6 +395,7 @@ addEventListener('beforeprint', () => document.querySelectorAll('details').forEa
   try {
     const [params, index] = await Promise.all([getJSON('params.json'), getJSON('data/sites/index.json')]);
     S.params = params;
+    S.index = index;
     $('#site-select').innerHTML = index.map(s => `<option value="${esc(s.site_id)}">${esc(s.name)} — ${esc(s.address)}</option>`).join('');
     $('#site-select').addEventListener('change', e => loadSite(e.target.value));
     await loadSite(index[0].site_id);

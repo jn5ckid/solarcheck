@@ -1,0 +1,7 @@
+raw/
+*.pt
+*.pth
+.env
+__pycache__/
+.venv/
+*.epw

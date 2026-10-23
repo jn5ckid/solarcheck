@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>솔라체크 · 외피 태양광 사전진단</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="style.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<header class="top">
+  <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="5" y="9" width="22" height="20" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 17h22M5 23h22M12 9v20M20 9v20" stroke="currentColor" stroke-width="1.2" opacity=".5"/><circle cx="23" cy="7" r="4.5" fill="var(--sun)"/></svg>
+  <span>솔라체크</span>
+  <ol class="steps" aria-label="진행 단계">
+    <li data-step="site">건물</li><li data-step="photo">입면</li><li data-step="result">결과</li>
+  </ol>
+</header>
+
+<main>
+  <section id="step-site" class="step">
+    <h1>우리 건물 외피 태양광 체크</h1>
+    <label class="field">건물 주소
+      <select id="site-select"></select>
+    </label>
+    <dl id="site-info" class="info"></dl>
+    <figure class="plan">
+      <svg id="plan" viewBox="0 0 360 300" role="img" aria-label="대상 건물과 주변 건물 배치도"></svg>
+      <figcaption>입면 색은 연간 일사량이에요. 진할수록 햇빛을 많이 받아요.</figcaption>
+    </figure>
+    <h2>촬영할 입면을 고르세요</h2>
+    <ul id="face-list" class="faces"></ul>
+    <label class="field">월평균 전기 사용량 <small>선택 · 비우면 용도별 평균값</small>
+      <input id="usage" type="number" inputmode="numeric" min="0" placeholder="예: 8000" aria-describedby="usage-unit">
+      <span id="usage-unit" class="unit">kWh</span>
+    </label>
+    <div class="actions">
+      <button id="go-photo" class="primary" disabled>입면 촬영하기</button>
+      <button id="go-result" class="ghost">사진 없이 결과 보기</button>
+    </div>
+  </section>
+
+  <section id="step-photo" class="step" hidden>
+    <h1 id="photo-title">입면 촬영</h1>
+    <p id="photo-hint" class="hint">입면 전체가 보이게 정면에서 찍어 주세요.</p>
+    <label class="primary file">사진 찍기 · 고르기
+      <input id="photo-input" type="file" accept="image/*" capture="environment">
+    </label>
+    <div id="corner-box" hidden>
+      <p id="corner-hint" class="hint"></p>
+      <canvas id="photo-canvas" aria-label="입면 사진. 네 모서리를 차례로 누르세요"></canvas>
+    </div>
+    <div id="grid-box" hidden>
+      <p class="hint">창이나 간판이 있는 칸을 누르면 설치 제외로 바뀌어요. 한 번 더 누르면 절반, 다시 누르면 벽으로 돌아와요.</p>
+      <canvas id="rect-canvas" aria-label="정면으로 보정한 입면과 설치 격자"></canvas>
+      <ul class="legend">
+        <li><i class="k-wall"></i>설치 가능</li><li><i class="k-half"></i>절반</li>
+        <li><i class="k-open"></i>창·간판</li><li><i class="k-shade"></i>음영 제외</li>
+      </ul>
+      <p id="open-ratio" class="hint"></p>
+    </div>
+    <div class="actions">
+      <button id="photo-reset" class="ghost" hidden>모서리 다시 지정</button>
+      <button id="photo-done" class="primary" disabled>결과 보기</button>
+      <button id="photo-back" class="ghost">건물로 돌아가기</button>
+    </div>
+  </section>
+
+  <section id="step-result" class="step" hidden>
+    <div id="verdict" class="verdict"></div>
+    <div id="metrics" class="metrics"></div>
+    <h2>회수기간 비교</h2>
+    <div id="payback" class="payback"></div>
+    <h2>어디에 붙이면 좋을까요</h2>
+    <ul id="face-result" class="faces result"></ul>
+    <details class="money">
+      <summary>비용 계산 근거</summary>
+      <table id="money"></table>
+    </details>
+    <h2>이 건물에 맞는 지원사업</h2>
+    <ul class="programs">
+      <li><b>그린리모델링 이자지원</b>외피 공사비 대출 이자 지원</li>
+      <li><b>그린리모델링 컨설팅</b>전문가 현장 진단 연결</li>
+      <li><b>신재생에너지 건물지원</b>태양광 설치비 보조</li>
+    </ul>
+    <details class="assume">
+      <summary>계산에 쓴 가정</summary>
+      <ul id="assumptions"></ul>
+    </details>
+    <div class="actions">
+      <button id="print" class="primary">리포트 저장 (PDF)</button>
+      <button id="again" class="ghost">다른 입면 촬영하기</button>
+    </div>
+  </section>
+</main>
+</body>
+</html>

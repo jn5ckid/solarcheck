@@ -4,6 +4,7 @@ import { clampImagePoint, nearestCornerIndex, rectifiedSizeFromCorners, validate
 import { loadFacades, saveFacade, removeFacade } from './facade-store.js';
 import { analyzeFacadeOpenings, cellFractionsToMask, closestFacadeByAzimuth, maskToCellFractions,
   openingRatioFromMask, paintMask, sensorAvailabilitiesFromMask } from './facade-openings.js?v=20261024-spatial-mask';
+import { analyzeFacadeWithCNN } from './facade-cnn.js?v=20261024-tflite';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
@@ -18,6 +19,7 @@ const S = { params: null, site: null, irr: null, face: null, cellsFrac: {}, img:
   generationResult: null };
 const viewer = new FacadeViewer($('#building-canvas'), id => pickFace(id), sensor => showResearchSensor(sensor));
 let siteLoadVersion = 0;
+let maskAnalysisVersion = 0;
 
 const labelFace = f => `${faceName(f)}${S.site?.source === 'public_api' ? ` · ${f.face_id}` : ''}`;
 const photoSite = () => S.mode === 'research' ? S.publicSite : S.site;
@@ -669,6 +671,7 @@ async function loadPhoto(e) {
   const file = e.target.files[0];
   if (!file) return;
   e.target.value = '';
+  ++maskAnalysisVersion;
   S.rectImg = null; S.mask = null; S.maskPointer = null;
   $('#photo-done').disabled = true;
   $('#photo-reset').hidden = true;
@@ -780,6 +783,7 @@ $('#photo-canvas').addEventListener('pointercancel', e => {
 });
 
 $('#photo-reset').addEventListener('click', () => {
+  ++maskAnalysisVersion;
   S.corners = []; S.cells = null; S.dragCorner = null; S.mask = null; S.maskPointer = null;
   $('#mask-box').hidden = true; $('#photo-reset').hidden = true; $('#photo-done').disabled = true;
   drawCorners();
@@ -806,6 +810,48 @@ function homography(from, to) {
   return [...A.map((row, i) => row[8] / row[i]), 1];
 }
 
+function drawRectifiedImage() {
+  if (!S.rectImg) return;
+  const cv = $('#rect-canvas');
+  cv.getContext('2d').putImageData(S.rectImg, 0, 0);
+}
+
+async function analyzeRectifiedFacade() {
+  if (!S.rectImg) return;
+  const version = ++maskAnalysisVersion, f = face();
+  S.mask = null; S.cells = null; S.maskPointer = null;
+  $('#photo-done').disabled = true;
+  $('#mask-auto').disabled = true;
+  $('#mask-method').textContent = 'DeepLab v3·MobileNet v2 모델을 처음 사용할 때는 파일을 내려받느라 시간이 걸릴 수 있어요.';
+  $('#photo-hint').textContent = 'CNN이 창문·문·간판·설비 후보를 픽셀 단위로 분할하고 있어요…';
+  drawRectifiedImage();
+  try {
+    const proposal = await analyzeFacadeWithCNN(S.rectImg);
+    if (version !== maskAnalysisVersion) return;
+    S.mask = proposal.mask;
+    S.cells = maskToCellFractions(S.mask, proposal.width, proposal.height, f.ns, f.nt);
+    const labels = proposal.labels.length ? proposal.labels.join(', ') : '해당 클래스 없음';
+    $('#mask-method').textContent = `${proposal.model} · 감지 클래스: ${labels}`;
+    $('#photo-hint').textContent = proposal.openingRatio > 0
+      ? 'CNN 분할 결과를 표시했어요. 잘못 판별한 부분은 붓으로 개구부를 더 칠하거나 벽면을 복원해 주세요.'
+      : 'CNN이 설치 불가 요소를 찾지 못했어요. 필요한 부분은 개구부 칠하기 붓으로 보정해 주세요.';
+  } catch (error) {
+    if (version !== maskAnalysisVersion) return;
+    const proposal = analyzeFacadeOpenings(S.rectImg, f.ns, f.nt);
+    S.mask = proposal.mask; S.cells = proposal.cells;
+    $('#mask-method').textContent = `CNN을 사용할 수 없어 기존 색상·명도·경계 기반 분석으로 대체했어요. ${error.message}`;
+    $('#photo-hint').textContent = proposal.openingRatio > 0
+      ? '대체 분석 결과를 표시했어요. 붓으로 개구부를 더 칠하거나 벽면을 복원해 주세요.'
+      : '뚜렷한 개구부 후보를 찾지 못했어요. 개구부 칠하기 붓으로 직접 마스킹할 수 있어요.';
+  } finally {
+    if (version === maskAnalysisVersion) {
+      $('#mask-auto').disabled = false;
+      $('#photo-done').disabled = !S.mask;
+      if (S.mask) drawMask();
+    }
+  }
+}
+
 function rectify() {
   const f = face();
   if (!validateCorners(S.corners)) {
@@ -829,16 +875,8 @@ function rectify() {
   }
   S.rectImg = out;
   $('#rectify-hint').textContent = `선택한 벽 경계의 가로·세로 비율을 유지해 ${W} × ${H}px 직사각형으로 보정했어요. 면적 계산에는 입면 치수 ${fmt(f.width_m, 1)} × ${fmt(f.height_m, 1)}m를 사용합니다.`;
-  if (!S.mask) {
-    const proposal = analyzeFacadeOpenings(out, f.ns, f.nt);
-    S.mask = proposal.mask; S.cells = proposal.cells;
-    $('#photo-hint').textContent = proposal.openingRatio > 0
-      ? '창문·문 후보를 픽셀 마스크로 표시했어요. 붓으로 개구부를 더 칠하거나 벽면을 복원해 주세요.'
-      : '뚜렷한 창문·문 후보를 찾지 못했어요. 개구부 칠하기 붓으로 직접 마스킹할 수 있어요.';
-  }
   $('#mask-box').hidden = false;
-  $('#photo-done').disabled = false;
-  drawMask();
+  void analyzeRectifiedFacade();
 }
 
 function updateCellsFromMask() {
@@ -875,12 +913,7 @@ function setMaskMode(mode) {
 $('#mask-opening').addEventListener('click', () => setMaskMode('opening'));
 $('#mask-wall').addEventListener('click', () => setMaskMode('wall'));
 $('#mask-brush-size').addEventListener('input', e => { S.brushRadius = Number(e.target.value); });
-$('#mask-auto').addEventListener('click', () => {
-  if (!S.rectImg) return;
-  const f = face(), proposal = analyzeFacadeOpenings(S.rectImg, f.ns, f.nt);
-  S.mask = proposal.mask; S.cells = proposal.cells; drawMask();
-  $('#photo-hint').textContent = '사진을 다시 판별해 개구부 마스크를 초기화했어요.';
-});
+$('#mask-auto').addEventListener('click', () => { void analyzeRectifiedFacade(); });
 
 const maskCanvasPoint = (canvas, event) => {
   const rect = canvas.getBoundingClientRect();

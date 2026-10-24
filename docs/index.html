@@ -6,7 +6,7 @@
 <title>솔라체크 · 외피 태양광 사전진단</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <link rel="stylesheet" href="style.css?v=20261024-five-stage">
-<script type="module" src="app.js?v=20261024-five-stage"></script>
+<script type="module" src="app.js?v=20261024-tflite"></script>
 </head>
 <body>
 <header class="top">
@@ -105,14 +105,15 @@
       <canvas id="photo-canvas" aria-label="입면 사진. 네 모서리를 차례로 누른 뒤 점을 드래그해 조정하세요"></canvas>
     </div>
     <div id="mask-box" hidden>
-      <h2>직사각형 원근 보정 결과</h2>
+      <h2>AI 입면 분할 결과</h2>
       <p id="rectify-hint" class="hint"></p>
-      <p class="hint">사진을 보정하면 창문·문 후보를 픽셀 마스크로 표시해요. 자동 결과가 다르면 붓으로 개구부를 더 칠하거나 벽면을 복원하세요.</p>
+      <p id="mask-method" class="hint">DeepLab v3·MobileNet v2 의미론적 분할로 창문·문·간판·설비 후보를 찾습니다.</p>
+      <p class="hint">자동 결과가 다르면 붓으로 개구부를 더 칠하거나 벽면을 복원하세요.</p>
       <div class="mask-tools" aria-label="개구부 마스크 편집 도구">
         <button id="mask-opening" class="ghost" type="button" aria-pressed="true">개구부 칠하기</button>
         <button id="mask-wall" class="ghost" type="button" aria-pressed="false">벽면 복원</button>
         <label>붓 크기 <input id="mask-brush-size" type="range" min="8" max="80" value="28"></label>
-        <button id="mask-auto" class="ghost" type="button">자동 마스크 다시 만들기</button>
+        <button id="mask-auto" class="ghost" type="button">AI 마스크 다시 실행</button>
       </div>
       <canvas id="rect-canvas" aria-label="직사각형으로 보정한 입면과 창문·문 픽셀 마스크"></canvas>
       <ul class="legend">

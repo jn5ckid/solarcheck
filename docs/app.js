@@ -4,7 +4,7 @@ import { clampImagePoint, nearestCornerIndex, rectifiedSizeFromCorners, validate
 import { loadFacades, saveFacade, removeFacade } from './facade-store.js';
 import { analyzeFacadeOpenings, cellFractionsToMask, closestFacadeByAzimuth, maskToCellFractions,
   openingRatioFromMask, paintMask, sensorAvailabilitiesFromMask } from './facade-openings.js?v=20261024-spatial-mask';
-import { analyzeFacadeWithCNN } from './facade-cnn.js?v=20261024-tflite';
+import { analyzeFacadeWithCNN, mergeOpeningMasks } from './facade-cnn.js?v=20261024-hybrid-mask';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
@@ -826,15 +826,17 @@ async function analyzeRectifiedFacade() {
   $('#photo-hint').textContent = 'CNN이 창문·문·간판·설비 후보를 픽셀 단위로 분할하고 있어요…';
   drawRectifiedImage();
   try {
-    const proposal = await analyzeFacadeWithCNN(S.rectImg);
+    const cnn = await analyzeFacadeWithCNN(S.rectImg);
     if (version !== maskAnalysisVersion) return;
-    S.mask = proposal.mask;
-    S.cells = maskToCellFractions(S.mask, proposal.width, proposal.height, f.ns, f.nt);
-    const labels = proposal.labels.length ? proposal.labels.join(', ') : '해당 클래스 없음';
-    $('#mask-method').textContent = `${proposal.model} · 감지 클래스: ${labels}`;
-    $('#photo-hint').textContent = proposal.openingRatio > 0
-      ? 'CNN 분할 결과를 표시했어요. 잘못 판별한 부분은 붓으로 개구부를 더 칠하거나 벽면을 복원해 주세요.'
-      : 'CNN이 설치 불가 요소를 찾지 못했어요. 필요한 부분은 개구부 칠하기 붓으로 보정해 주세요.';
+    const assist = analyzeFacadeOpenings(S.rectImg, f.ns, f.nt);
+    S.mask = mergeOpeningMasks(cnn.mask, assist.mask);
+    S.cells = maskToCellFractions(S.mask, cnn.width, cnn.height, f.ns, f.nt);
+    const labels = cnn.labels.length ? cnn.labels.join(', ') : 'CNN 클래스 없음';
+    const ratio = openingRatioFromMask(S.mask);
+    $('#mask-method').textContent = `${cnn.model} + 색상·명도·경계 보조 · 감지: ${labels}`;
+    $('#photo-hint').textContent = ratio > 0
+      ? 'AI와 보조 픽셀 분석을 합친 마스크를 표시했어요. 잘못 판별한 부분은 붓으로 개구부를 더 칠하거나 벽면을 복원해 주세요.'
+      : '자동 분석이 설치 불가 요소를 찾지 못했어요. 개구부 칠하기 붓으로 직접 마스킹해 주세요.';
   } catch (error) {
     if (version !== maskAnalysisVersion) return;
     const proposal = analyzeFacadeOpenings(S.rectImg, f.ns, f.nt);

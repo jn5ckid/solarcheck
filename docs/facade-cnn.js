@@ -22,6 +22,20 @@ const FACADE_BLOCKING_IDS = new Set(ADE20K_LABELS.keys());
 const normalizeLabel = value => String(value || '').trim().toLowerCase();
 const colorKey = color => color.slice(0, 3).map(value => Number(value) || 0).join(',');
 
+export function mergeOpeningMasks(...masks) {
+  const usable = masks.filter(Boolean);
+  if (!usable.length) throw new Error('합칠 개구부 마스크가 필요해요.');
+  const length = usable[0].length;
+  if (!length || usable.some(mask => mask.length !== length)) {
+    throw new Error('개구부 마스크의 크기가 서로 달라요.');
+  }
+  const merged = new Uint8ClampedArray(length);
+  for (const mask of usable) for (let i = 0; i < length; i++) {
+    merged[i] = Math.max(merged[i], mask[i]);
+  }
+  return merged;
+}
+
 function resizeMask(source, sourceWidth, sourceHeight, targetWidth, targetHeight) {
   const mask = new Uint8ClampedArray(targetWidth * targetHeight);
   for (let y = 0; y < targetHeight; y++) for (let x = 0; x < targetWidth; x++) {

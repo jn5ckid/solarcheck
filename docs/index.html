@@ -6,7 +6,7 @@
 <title>솔라체크 · 외피 태양광 사전진단</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <link rel="stylesheet" href="style.css?v=20261024-five-stage">
-<script type="module" src="app.js?v=20261024-tflite"></script>
+<script type="module" src="app.js?v=20261024-hybrid-mask"></script>
 </head>
 <body>
 <header class="top">
@@ -107,7 +107,7 @@
     <div id="mask-box" hidden>
       <h2>AI 입면 분할 결과</h2>
       <p id="rectify-hint" class="hint"></p>
-      <p id="mask-method" class="hint">DeepLab v3·MobileNet v2 의미론적 분할로 창문·문·간판·설비 후보를 찾습니다.</p>
+      <p id="mask-method" class="hint">DeepLab v3·MobileNet v2와 픽셀 경계 보조 분석으로 창문·문·간판·설비 후보를 찾습니다.</p>
       <p class="hint">자동 결과가 다르면 붓으로 개구부를 더 칠하거나 벽면을 복원하세요.</p>
       <div class="mask-tools" aria-label="개구부 마스크 편집 도구">
         <button id="mask-opening" class="ghost" type="button" aria-pressed="true">개구부 칠하기</button>

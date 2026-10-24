@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { projectPoint, facadeCorners, imageTransform, validateCorners, pointInPolygon } from '../docs/facade-geometry.js';
+import { clampImagePoint, nearestCornerIndex, pointInPolygon, projectPoint, facadeCorners,
+  imageTransform, rectifiedSize, validateCorners } from '../docs/facade-geometry.js';
 import { FacadeViewer, researchDisplayPoint, researchPointRadii, facadeHeatmapCells } from '../docs/facade-viewer.js';
 
 test('research sensor display offset follows its normal without changing source XYZ', () => {
@@ -55,6 +56,19 @@ test('corner selection rejects crossed, repeated, reversed, and nearly collinear
   assert.equal(validateCorners([[0, 0], [0, 0], [100, 100], [0, 100]]), false);
   assert.equal(validateCorners([[0, 0], [0, 100], [100, 100], [100, 0]]), false);
   assert.equal(validateCorners([[0, 0], [1, 0], [2, 0], [3, 0]]), false);
+});
+
+test('corner dragging selects the nearest handle and stays inside the image', () => {
+  const corners = [[10, 10], [190, 12], [188, 290], [12, 288]];
+  assert.equal(nearestCornerIndex(corners, [18, 15], 20), 0);
+  assert.equal(nearestCornerIndex(corners, [100, 100], 20), -1);
+  assert.deepEqual(clampImagePoint([-5, 320], 200, 300), [0, 299]);
+});
+
+test('rectified preview keeps the measured facade aspect ratio', () => {
+  const [width, height] = rectifiedSize(12, 18, 20, 720, 960);
+  assert.ok(Math.abs(width / height - 12 / 18) < .01);
+  assert.ok(width <= 720 && height <= 960);
 });
 
 test('face selection respects the projected polygon, not its bounding rectangle', () => {

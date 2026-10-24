@@ -1,6 +1,6 @@
 import { evaluate, faceName, openingRatio } from './calc.js?v=20261024-research-cleanup';
 import { FacadeViewer } from './facade-viewer.js?v=20261024-research-cleanup';
-import { validateCorners } from './facade-geometry.js';
+import { clampImagePoint, nearestCornerIndex, rectifiedSize, validateCorners } from './facade-geometry.js?v=20261024-perspective-mask';
 import { loadFacades, saveFacade, removeFacade } from './facade-store.js';
 import { analyzeFacadeOpenings, closestFacadeByAzimuth } from './facade-openings.js?v=20261024-auto-openings';
 
@@ -13,7 +13,7 @@ const MAX_SRC = 1600;    // 사진 긴 변 최대 px
 
 const S = { params: null, site: null, irr: null, face: null, cellsFrac: {}, img: null, corners: [], cells: null,
   textures: {}, mode: 'site', publicSite: null, researchOverview: null, researchBuilding: null, researchSensors: [], researchGroup: null,
-  researchMonthly: null, researchAddress: null, analysisGrid: null, candidatePrediction: null };
+  researchMonthly: null, researchAddress: null, analysisGrid: null, candidatePrediction: null, dragCorner: null };
 const viewer = new FacadeViewer($('#building-canvas'), id => pickFace(id), sensor => showResearchSensor(sensor));
 let siteLoadVersion = 0;
 
@@ -514,7 +514,7 @@ function openPhoto() {
   const f = face();
   $('#photo-title').textContent = `${photoFaceLabel()} 사진`;
   $('#photo-hint').textContent = `건물 밖에서 ${photoFaceLabel()}을 정면으로 보고, 벽 전체가 들어오게 찍어 주세요.`;
-  S.img = null; S.rectImg = null; S.corners = [];
+  S.img = null; S.rectImg = null; S.corners = []; S.dragCorner = null;
   S.cells = S.cellsFrac[S.face] ? [...S.cellsFrac[S.face]] : null;
   $('#corner-box').hidden = true;
   $('#grid-box').hidden = true;
@@ -543,7 +543,7 @@ async function loadPhoto(e) {
   c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
   c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
   bmp.close();
-  S.img = c; S.corners = [];
+  S.img = c; S.corners = []; S.dragCorner = null;
   S.cells = null;
   $('#grid-box').hidden = true;
   $('#corner-box').hidden = false;
@@ -558,16 +558,37 @@ function drawCorners() {
   cv.width = S.img.width; cv.height = S.img.height;
   g.drawImage(S.img, 0, 0);
   const r = Math.max(6, S.img.width / 120);
+  if (S.corners.length === 4) {
+    g.save();
+    g.fillStyle = 'rgba(8,24,20,.52)';
+    g.beginPath(); g.rect(0, 0, cv.width, cv.height);
+    S.corners.forEach(([x, y], index) => index ? g.lineTo(x, y) : g.moveTo(x, y));
+    g.closePath(); g.fill('evenodd'); g.restore();
+  }
   g.lineWidth = r / 2; g.strokeStyle = '#f2b300'; g.fillStyle = '#f2b300';
   g.beginPath();
   S.corners.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
   if (S.corners.length === 4) g.closePath();
   g.stroke();
-  S.corners.forEach(([x, y]) => { g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); });
+  S.corners.forEach(([x, y], index) => {
+    g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+    g.fillStyle = '#18302a'; g.font = `bold ${Math.max(11, r * 1.35)}px system-ui`;
+    g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(String(index + 1), x, y);
+    g.fillStyle = '#f2b300';
+  });
+  cv.classList.toggle('corners-ready', S.corners.length === 4);
   $('#corner-hint').textContent = S.corners.length < 4
     ? `벽의 ${CORNERS[S.corners.length]} 모서리를 누르세요 (${S.corners.length + 1}/4)`
-    : '모서리 지정 완료';
+    : '선택 영역 밖은 분석에서 제외돼요. 네 점을 드래그해 벽 경계를 맞춘 뒤 아래 직사각형 보정 결과를 확인하세요.';
 }
+
+const canvasPoint = (canvas, event) => {
+  const rect = canvas.getBoundingClientRect();
+  return clampImagePoint([
+    (event.clientX - rect.left) * canvas.width / rect.width,
+    (event.clientY - rect.top) * canvas.height / rect.height,
+  ], canvas.width, canvas.height);
+};
 
 $('#photo-canvas').addEventListener('click', e => {
   if (!S.img || S.corners.length >= 4) return;
@@ -580,8 +601,46 @@ $('#photo-canvas').addEventListener('click', e => {
   }
 });
 
+$('#photo-canvas').addEventListener('pointerdown', e => {
+  if (!S.img || S.corners.length !== 4) return;
+  const cv = e.currentTarget;
+  const index = nearestCornerIndex(S.corners, canvasPoint(cv, e), Math.max(20, cv.width / 32));
+  if (index < 0) return;
+  e.preventDefault();
+  S.dragCorner = {index, pointerId: e.pointerId, start: S.corners.map(point => [...point])};
+  cv.setPointerCapture?.(e.pointerId); cv.classList.add('dragging');
+});
+
+$('#photo-canvas').addEventListener('pointermove', e => {
+  if (!S.dragCorner || S.dragCorner.pointerId !== e.pointerId) return;
+  e.preventDefault();
+  S.corners[S.dragCorner.index] = canvasPoint(e.currentTarget, e);
+  drawCorners();
+});
+
+function finishCornerDrag(canvas, cancelled = false) {
+  if (!S.dragCorner) return;
+  const previous = S.dragCorner.start;
+  canvas.releasePointerCapture?.(S.dragCorner.pointerId);
+  canvas.classList.remove('dragging'); S.dragCorner = null;
+  if (cancelled || !validateCorners(S.corners)) {
+    S.corners = previous; drawCorners();
+    $('#corner-hint').textContent = '네 점이 교차하지 않도록 벽 모서리 안에서 조정해 주세요.';
+    return;
+  }
+  S.cells = null;
+  drawCorners(); rectify();
+}
+
+$('#photo-canvas').addEventListener('pointerup', e => {
+  if (S.dragCorner?.pointerId === e.pointerId) finishCornerDrag(e.currentTarget);
+});
+$('#photo-canvas').addEventListener('pointercancel', e => {
+  if (S.dragCorner?.pointerId === e.pointerId) finishCornerDrag(e.currentTarget, true);
+});
+
 $('#photo-reset').addEventListener('click', () => {
-  S.corners = []; S.cells = null;
+  S.corners = []; S.cells = null; S.dragCorner = null;
   $('#grid-box').hidden = true; $('#photo-reset').hidden = true; $('#photo-done').disabled = true;
   drawCorners();
 });
@@ -613,9 +672,7 @@ function rectify() {
     $('#corner-hint').textContent = '왼쪽 위 → 오른쪽 위 → 오른쪽 아래 → 왼쪽 아래 순서로 모서리를 다시 지정해 주세요.';
     return;
   }
-  let W = Math.round(f.width_m * PPM), H = Math.round(f.height_m * PPM);
-  const k = Math.min(1, 720 / W, 960 / H);
-  W = Math.round(W * k); H = Math.round(H * k);
+  const [W, H] = rectifiedSize(f.width_m, f.height_m, PPM);
   let h;
   try { h = homography([[0, 0], [W, 0], [W, H], [0, H]], S.corners); }
   catch (err) { $('#corner-hint').textContent = err.message; return; }
@@ -631,6 +688,7 @@ function rectify() {
     out.data[o] = src.data[i]; out.data[o + 1] = src.data[i + 1]; out.data[o + 2] = src.data[i + 2]; out.data[o + 3] = 255;
   }
   S.rectImg = out;
+  $('#rectify-hint').textContent = `실제 입면 ${fmt(f.width_m, 1)} × ${fmt(f.height_m, 1)}m 비율로 ${W} × ${H}px 직사각형에 보정했어요.`;
   if (!S.cells) {
     const proposal = analyzeFacadeOpenings(out, f.ns, f.nt);
     S.cells = proposal.cells;

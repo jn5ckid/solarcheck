@@ -41,3 +41,26 @@ export function validateCorners(points) {
     return a + p[0] * q[1] - q[0] * p[1];
   }, 0)) > 50;
 }
+
+export function nearestCornerIndex(points, [x, y], radius) {
+  if (!Array.isArray(points) || !(radius > 0)) return -1;
+  let best = -1, bestDistance = radius;
+  points.forEach(([px, py], index) => {
+    const distance = Math.hypot(px - x, py - y);
+    if (distance <= bestDistance) { best = index; bestDistance = distance; }
+  });
+  return best;
+}
+
+export function clampImagePoint([x, y], width, height) {
+  return [Math.min(width - 1, Math.max(0, x)), Math.min(height - 1, Math.max(0, y))];
+}
+
+export function rectifiedSize(widthM, heightM, ppm = 20, maxWidth = 720, maxHeight = 960) {
+  if (!(widthM > 0) || !(heightM > 0) || !(ppm > 0) || !(maxWidth > 0) || !(maxHeight > 0)) {
+    throw new Error('입면 폭과 높이가 올바르지 않아요.');
+  }
+  const rawWidth = widthM * ppm, rawHeight = heightM * ppm;
+  const scale = Math.min(1, maxWidth / rawWidth, maxHeight / rawHeight);
+  return [Math.max(1, Math.round(rawWidth * scale)), Math.max(1, Math.round(rawHeight * scale))];
+}

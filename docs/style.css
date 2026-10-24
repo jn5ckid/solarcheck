@@ -104,6 +104,8 @@ button, .file { font: inherit; font-weight: 700; border-radius: 10px; padding: 1
 .hint { color: var(--muted); font-size: .9rem; margin: 8px 0; }
 canvas { display: block; width: 100%; height: auto; border-radius: 8px; background: #d9e2df; touch-action: manipulation; }
 #photo-canvas, #rect-canvas { cursor: crosshair; }
+#photo-canvas.corners-ready { cursor: grab; touch-action: none; }
+#photo-canvas.dragging { cursor: grabbing; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 0; margin: 10px 0; list-style: none; font-size: .82rem; }
 .legend i { display: inline-block; width: 12px; height: 12px; margin-right: 5px; vertical-align: -1px; border: 1px solid #0003; }
 .k-wall { background: rgba(242, 179, 0, .55); }

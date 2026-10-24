@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>솔라체크 · 외피 태양광 사전진단</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="style.css?v=20261024-monthly-facade">
-<script type="module" src="app.js?v=20261024-auto-openings"></script>
+<link rel="stylesheet" href="style.css?v=20261024-perspective-mask">
+<script type="module" src="app.js?v=20261024-perspective-mask"></script>
 </head>
 <body>
 <header class="top">
@@ -97,9 +97,11 @@
     <p id="photo-source-hint" class="hint">휴대폰에서는 후면 카메라로 촬영할 수 있어요. 기기·브라우저에 따라 촬영 버튼도 파일 선택 화면을 열 수 있어요.</p>
     <div id="corner-box" hidden>
       <p id="corner-hint" class="hint"></p>
-      <canvas id="photo-canvas" aria-label="입면 사진. 네 모서리를 차례로 누르세요"></canvas>
+      <canvas id="photo-canvas" aria-label="입면 사진. 네 모서리를 차례로 누른 뒤 점을 드래그해 조정하세요"></canvas>
     </div>
     <div id="grid-box" hidden>
+      <h2>직사각형 원근 보정 결과</h2>
+      <p id="rectify-hint" class="hint"></p>
       <p class="hint">사진을 보정하면 창문·문 후보를 자동으로 표시해요. 결과가 다르면 칸을 눌러 제외 → 절반 → 벽면 순서로 수정하세요.</p>
       <canvas id="rect-canvas" aria-label="정면으로 보정한 입면과 설치 격자"></canvas>
       <ul class="legend">

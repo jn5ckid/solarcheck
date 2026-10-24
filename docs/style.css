@@ -23,13 +23,24 @@ h2 { font-size: 1.05rem; margin: 28px 0 10px; }
 small { color: var(--muted); font-weight: 400; }
 
 .top {
-  position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px;
-  padding: 10px 16px; background: var(--ink); color: #fff; font-weight: 700;
+  position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: minmax(72px, 1fr) auto minmax(72px, 1fr);
+  align-items: center; gap: 10px; padding: 9px 14px; background: var(--ink); color: #fff; font-weight: 700;
 }
 .mark { width: 26px; height: 26px; }
-.steps { display: flex; gap: 4px; margin: 0 0 0 auto; padding: 0; list-style: none; font-size: .8rem; font-weight: 500; }
-.steps li { padding: 3px 9px; border-radius: 99px; color: #9fb5ae; }
-.steps li.on { background: var(--sun); color: var(--ink); font-weight: 700; }
+.brand { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.workflow-nav { display: flex; justify-content: center; gap: 3px; min-width: 0; }
+.workflow-nav button { padding: 5px 9px; border-radius: 99px; color: #a9bdb7; background: transparent; font-size: .76rem; font-weight: 600; white-space: nowrap; }
+.workflow-nav button:disabled { opacity: .38; }
+.workflow-nav button[aria-current="step"] { color: var(--ink); background: var(--sun); font-weight: 800; opacity: 1; }
+.header-spacer { min-width: 72px; }
+.step-kicker { margin: 20px 0 0; color: var(--teal); font-size: .8rem; font-weight: 800; }
+.step-kicker + h1 { margin-top: 3px; }
+.step-navigation { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 8px; margin-top: 28px; }
+.workflow-step[hidden], #step-photo[hidden] { display: none; }
+.report-preview { padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+.report-preview h2 { margin-top: 0; }
+.report-preview .report-meta { color: var(--muted); font-size: .82rem; }
+.report-preview .report-section { padding-top: 12px; margin-top: 14px; border-top: 1px solid var(--line); }
 
 .field { display: block; position: relative; margin: 12px 0; font-weight: 600; font-size: .9rem; }
 select, input[type=number], input[type=search], input[type=url], input[type=date] {
@@ -88,6 +99,7 @@ button:disabled { opacity: .55; cursor: default; }
 .swatch { width: 14px; height: 14px; border-radius: 3px; }
 .faces .sub { display: block; font-size: .82rem; color: var(--muted); }
 .faces .val { font-weight: 700; font-variant-numeric: tabular-nums; }
+.faces .empty-card { padding: 18px; color: var(--muted); text-align: center; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
 
 .actions { display: grid; gap: 8px; margin-top: 24px; }
 .actions[hidden] { display: none; }
@@ -147,8 +159,12 @@ details ul { padding-left: 18px; color: var(--muted); }
 #money td:last-child { text-align: right; }
 
 @media print {
-  .top, .actions, .programs, h2:has(+ .programs) { display: none; }
+  .top, .actions, .step-navigation, .programs, h2:has(+ .programs), .step-kicker, #step-report > h1 { display: none; }
   body { background: #fff; }
+  main { max-width: none; padding: 0; }
+  main > section:not(#step-report) { display: none !important; }
+  #step-report { display: block !important; }
+  .report-preview { border: 0; padding: 0; }
   details { border: 1px solid var(--line); }
 }
 @media (prefers-reduced-motion: no-preference) {
@@ -156,3 +172,12 @@ details ul { padding-left: 18px; color: var(--muted); }
 }
 #irradiance-canvas { display: block; width: 100%; max-width: 720px; cursor: crosshair; margin: 1rem 0; }
 #irradiance-cell-value { display: block; min-height: 2em; }
+
+@media (max-width: 760px) {
+  .top { grid-template-columns: auto minmax(0, 1fr); padding: 8px 10px; }
+  .brand span { display: none; }
+  .header-spacer { display: none; }
+  .workflow-nav { justify-content: flex-start; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+  .workflow-nav::-webkit-scrollbar { display: none; }
+  .workflow-nav button { padding-inline: 8px; }
+}

@@ -14,7 +14,8 @@ const MAX_SRC = 1600;    // 사진 긴 변 최대 px
 const S = { params: null, site: null, irr: null, face: null, cellsFrac: {}, img: null, corners: [], cells: null,
   textures: {}, mode: 'site', publicSite: null, researchOverview: null, researchBuilding: null, researchSensors: [], researchGroup: null,
   researchMonthly: null, researchAddress: null, analysisGrid: null, candidatePrediction: null, dragCorner: null,
-  mask: null, maskMode: 'opening', maskPointer: null, brushRadius: 28, facadeMasks: {} };
+  mask: null, maskMode: 'opening', maskPointer: null, brushRadius: 28, facadeMasks: {}, stage: 'lookup', maxStage: 0,
+  generationResult: null };
 const viewer = new FacadeViewer($('#building-canvas'), id => pickFace(id), sensor => showResearchSensor(sensor));
 let siteLoadVersion = 0;
 
@@ -34,12 +35,28 @@ async function getJSON(url) {
   if (!r.ok) throw new Error(`${url} 를 불러오지 못했어요 (${r.status})`);
   return r.json();
 }
-function show(step) {
-  for (const id of ['site', 'photo', 'result']) $(`#step-${id}`).hidden = id !== step;
-  document.querySelectorAll('.steps li').forEach(li => li.classList.toggle('on', li.dataset.step === step));
-  scrollTo(0, 0);
-  if (step === 'site') requestAnimationFrame(() => viewer.draw());
+const STAGES = ['lookup', 'facade', 'solar', 'generation', 'report'];
+function unlockStage(stage) {
+  S.maxStage = Math.max(S.maxStage, STAGES.indexOf(stage));
+  document.querySelectorAll('.workflow-nav [data-stage]').forEach(button => {
+    button.disabled = STAGES.indexOf(button.dataset.stage) > S.maxStage;
+  });
 }
+function show(step) {
+  const activeStage = step === 'photo' ? 'facade' : step;
+  for (const id of [...STAGES, 'photo']) $(`#step-${id}`).hidden = id !== step;
+  S.stage = activeStage;
+  document.querySelectorAll('.workflow-nav [data-stage]').forEach(button => {
+    if (button.dataset.stage === activeStage) button.setAttribute('aria-current', 'step');
+    else button.removeAttribute('aria-current');
+  });
+  scrollTo(0, 0);
+  if (step === 'facade') requestAnimationFrame(() => viewer.draw());
+  if (step === 'solar') requestAnimationFrame(() => drawSolarSummary());
+}
+document.querySelectorAll('.workflow-nav [data-stage]').forEach(button => button.addEventListener('click', () => {
+  if (!button.disabled) show(button.dataset.stage);
+}));
 // 일사량 색: 음영(회청) → 햇빛(노랑) → 강한 일사(주황)
 const RAMP = [[96, 112, 120], [150, 160, 150], [242, 179, 0], [232, 110, 30]];
 function color(v, lo, hi) {
@@ -115,6 +132,7 @@ async function displaySite(site, irr, version = ++siteLoadVersion) {
   const id = site.site_id;
   S.mode = 'site'; S.site = site; S.publicSite = site; S.irr = irr; S.researchBuilding = null; S.researchSensors = []; S.researchGroup = null;
   S.researchAddress = null;
+  S.generationResult = null;
   S.researchMonthly = null; $('#research-monthly-panel').hidden = true;
   S.face = null; S.cellsFrac = {}; S.textures = {}; S.facadeMasks = {};
   viewer.setSite(site); viewer.setContext($('#model-context').checked);
@@ -126,16 +144,16 @@ async function displaySite(site, irr, version = ++siteLoadVersion) {
   $('#face-list-title').textContent = '사진을 촬영·적용할 입면을 고르세요';
   $('#model-context').disabled = false;
   $('#go-photo').textContent = '선택한 입면 사진 촬영·선택';
-  $('#go-photo').hidden = false; $('#go-result').hidden = false; $('#check-surrogate').hidden = false;
+  $('#go-photo').hidden = false; $('#check-surrogate').hidden = false;
   $('#building-actions').hidden = false;
   $('#building-result').hidden = false;
+  $('#lookup-next').disabled = false; unlockStage('facade');
+  $('#facade-next').disabled = true; $('#solar-next').disabled = true;
   $('#loaded-building-name').textContent = `${site.name} · ${site.address}`;
   $('#registry-info-title').hidden = false;
   $('#site-info').hidden = false;
   $('#site-info').innerHTML = buildingInfo(site);
   $('#public-data-details').hidden = !!irr;
-  $('#go-result').disabled = !irr;
-  $('#go-result').textContent = irr ? '사진 없이 데모 결과 보기' : '일사량 분석 연결 전';
   drawFaceList();
   $('#go-photo').disabled = true;
   $('#model-front').disabled = true;
@@ -147,7 +165,6 @@ async function displaySite(site, irr, version = ++siteLoadVersion) {
   $('#facade-status').textContent = !storageAvailable ? '사진 저장소를 사용할 수 없어 현재 화면에만 사진을 입힐 수 있어요.'
     : count ? `이 건물의 입면 ${count}곳에 저장된 사진을 불러왔어요.`
       : '입면을 고르고 사진의 네 모서리를 지정하면 해당 벽면에 입혀요. 사진은 이 기기에 저장돼요.';
-  if (irr) $('#go-result').textContent = count ? '데모 진단 결과 보기' : '사진 없이 데모 결과 보기';
   if (!site.faces.length) $('#facade-status').textContent = '높이가 없어 사진을 붙일 입면을 만들지 못했어요. 건물의 높이 또는 지상층수 확인이 필요해요.';
   drawIrradianceGrid();
 }
@@ -207,6 +224,7 @@ function pickFace(id) {
   $('#remove-photo').hidden = !S.textures[id];
   viewer.select(id);
   $('#go-photo').textContent = `${labelFace(face())} 사진 ${S.textures[id] ? '촬영·교체' : '촬영·선택'}`;
+  $('#facade-next').disabled = false;
 }
 
 $('#model-reset').addEventListener('click', () => viewer.reset());
@@ -229,7 +247,6 @@ $('#remove-photo').addEventListener('click', async () => {
     S.researchMonthly = null; void loadResearchMonthly(selectedResearchGroup());
   } else {
     pickFace(id);
-    if (S.irr) $('#go-result').textContent = Object.keys(S.textures).length ? '데모 진단 결과 보기' : '사진 없이 데모 결과 보기';
     $('#facade-status').textContent = `${labelFace(face())} 사진을 지웠어요.`;
   }
 });
@@ -308,6 +325,10 @@ async function predictCandidateGrid(siteId, version) {
       sensor.color = color(annual, lo, hi);
     }
     S.candidatePrediction = result;
+    if (S.stage === 'solar') {
+      $('#solar-next').disabled = false;
+      drawSolarSummary();
+    }
     $('#model-heatmap').checked = true; $('#model-heatmap').disabled = false; viewer.setHeatmap(true);
     $('#model-draft').checked = false; viewer.setPoints(false); viewer.setDraft(false);
     $('#surrogate-status').textContent = `E2c 연간 예측 완료 · 평균 ${fmt(result.annual_mean, 1)} kWh/㎡·년 · 범위 ${fmt(result.annual_min, 1)}–${fmt(result.annual_max, 1)}`;
@@ -342,6 +363,7 @@ async function loadResearchBuilding(buildingId, context = {}) {
     S.mode = 'research'; S.site = null; S.publicSite = context.publicSite || null; S.irr = null; S.face = null; S.researchBuilding = building;
     S.researchSensors = sensors; S.researchGroup = null; S.researchMonthly = null;
     S.researchAddress = context.address || null; S.analysisGrid = context.analysisGrid || null; S.candidatePrediction = null; ++researchMonthlyVersion;
+    S.generationResult = null;
     S.cellsFrac = {}; S.textures = {}; S.facadeMasks = {};
     if (S.publicSite) await restoreFacadePhotos(S.publicSite);
     if (version !== researchVersion) return;
@@ -352,6 +374,8 @@ async function loadResearchBuilding(buildingId, context = {}) {
       cell_target_m: S.analysisGrid?.cell_target_m || 1.5,
       draftSensors: S.analysisGrid?.sensors || []});
     $('#building-result').hidden = false;
+    $('#lookup-next').disabled = false; unlockStage('facade');
+    $('#facade-next').disabled = true; $('#solar-next').disabled = true;
     $('#building-canvas').setAttribute('aria-label', `${building.building_id} 대상 건물의 연간 일사량 면 컬러맵 3D 보기. 센서 포인트 표시는 선택해서 켤 수 있습니다.`);
     $('#loaded-building-name').textContent = context.address || '연구 대상지 건물';
     $('#registry-info-title').hidden = !S.publicSite;
@@ -374,7 +398,7 @@ async function loadResearchBuilding(buildingId, context = {}) {
     $('#model-front').disabled = true; $('#go-photo').disabled = true; $('#remove-photo').hidden = true;
     $('#building-actions').hidden = !S.publicSite;
     $('#go-photo').hidden = false; $('#go-photo').textContent = '입면을 선택하면 사진을 분석할 수 있어요';
-    $('#go-result').hidden = true; $('#check-surrogate').hidden = true;
+    $('#check-surrogate').hidden = true;
     $('#irradiance-grid').hidden = true;
     $('#research-monthly-panel').hidden = true;
     $('#surrogate-status').textContent = candidateCount
@@ -463,13 +487,55 @@ function drawResearchGroups() {
       ? `${researchSurfaceLabel(selectedGroup)} 사진 ${S.textures[mappedFace.face_id] ? '촬영·교체' : '촬영·선택'}`
       : selectedGroup?.surface_type === 'Roof' ? '지붕 사진 분석은 지원하지 않아요' : '입면을 선택하면 사진을 분석할 수 있어요';
     $('#remove-photo').hidden = !mappedFace || !S.textures[mappedFace.face_id];
+    $('#facade-next').disabled = !selectedGroup;
     const selectedAnnual = selectedGroup ? weightedResearchAnnual(researchWeightEntries(selectedGroup)) : buildingMean;
     $('#facade-status').textContent = selectedGroup
       ? `${researchSurfaceLabel(selectedGroup)} · 가용 위치 연평균 ${fmt(selectedAnnual)} kWh/㎡·년`
       : `건물 전체 평균 · ${fmt(buildingMean)} kWh/㎡·년`;
     void loadResearchMonthly(selectedGroup || null);
+    drawSolarSummary();
   }));
 }
+
+function drawSolarSummary() {
+  const box = $('#solar-face-list');
+  if (S.mode === 'research' && S.researchBuilding) {
+    const [lo, hi] = S.researchOverview.annual_prediction_range_kwh_m2_year;
+    box.innerHTML = S.researchBuilding.surface_groups.map(group => {
+      const entries = researchWeightEntries(group), annual = weightedResearchAnnual(entries);
+      const masked = entries.some(entry => entry.masked);
+      return `<li><button type="button" data-solar-group="${esc(group.surface_group_id)}" aria-pressed="${S.researchGroup === group.surface_group_id}">
+        <span class="swatch" style="background:${color(annual, lo, hi)}"></span>
+        <span>${researchSurfaceLabel(group)}<span class="sub">${masked ? '설치 불가 위치 제외 후 평균' : '전체 분석 위치 평균'}</span></span>
+        <span class="val">${fmt(annual)}<span class="sub">kWh/㎡·년</span></span></button></li>`;
+    }).join('');
+    box.querySelectorAll('[data-solar-group]').forEach(button => button.addEventListener('click', () => {
+      S.researchGroup = button.dataset.solarGroup;
+      const group = selectedResearchGroup(), mappedFace = researchPhotoFace(group);
+      S.face = mappedFace?.face_id || null;
+      viewer.setResearchGroup(S.researchGroup); drawResearchGroups(); drawSolarSummary();
+      void loadResearchMonthly(group);
+    }));
+    $('#solar-next').disabled = !S.candidatePrediction;
+    return;
+  }
+  if (!S.site || !S.irr) {
+    box.innerHTML = '<li class="empty-card">일사량 예측 결과를 준비하지 못했어요.</li>';
+    $('#solar-next').disabled = true; return;
+  }
+  const [lo, hi] = range();
+  box.innerHTML = S.site.faces.map(f => {
+    const annual = mean(S.irr.faces[f.face_id].annual);
+    return `<li><button type="button" data-solar-face="${esc(f.face_id)}" aria-pressed="${S.face === f.face_id}">
+      <span class="swatch" style="background:${color(annual, lo, hi)}"></span><span>${labelFace(f)}<span class="sub">입면 위치별 연간 예측</span></span>
+      <span class="val">${fmt(annual)}<span class="sub">kWh/㎡·년</span></span></button></li>`;
+  }).join('');
+  box.querySelectorAll('[data-solar-face]').forEach(button => button.addEventListener('click', () => {
+    S.face = button.dataset.solarFace; drawSolarSummary(); drawIrradianceGrid();
+  }));
+  $('#solar-next').disabled = false;
+}
+
 function showResearchSensor(sensor) {
   $('#facade-status').textContent = `${sensor.surface_type === 'Roof' ? '지붕' : '입면'} 분석 위치 · 연평균 ${fmt(sensor.annual_prediction_kwh_m2_year, 1)} kWh/㎡·년`;
 }
@@ -574,7 +640,11 @@ async function lookupBuilding(query) {
   }
 }
 $('#building-search').addEventListener('submit', e => {
-  e.preventDefault(); lookupBuilding({address:$('#building-query').value.trim(), radius_m:Number($('#lookup-radius').value)});
+  e.preventDefault();
+  S.maxStage = 0; unlockStage('lookup'); S.generationResult = null;
+  $('#lookup-next').disabled = true; $('#facade-next').disabled = true; $('#solar-next').disabled = true;
+  $('#building-result').hidden = true;
+  lookupBuilding({address:$('#building-query').value.trim(), radius_m:Number($('#lookup-radius').value)});
 });
 
 // ---------- 2. 입면 사진 ----------
@@ -882,23 +952,73 @@ $('#photo-done').addEventListener('click', async () => {
       $('#facade-status').textContent = `${photoFaceLabel()}의 개구부 위치를 제외해 일사량 집계를 갱신했어요.`;
       S.researchMonthly = null; void loadResearchMonthly(selectedResearchGroup());
     }
-    if (S.irr) $('#go-result').textContent = '데모 진단 결과 보기';
     if (S.mode !== 'research') $('#facade-status').textContent = saved ? `${labelFace(face())}에 사진을 입혔어요. 이 기기의 브라우저에 저장했어요.`
       : '사진을 입혔지만 브라우저에 저장하지 못했어요. 새로고침하면 사진이 사라질 수 있어요.';
-    show('site'); viewer.faceFront();
+    show('facade'); viewer.faceFront();
     $('#building-canvas').scrollIntoView({block: 'center', behavior: 'instant'});
   } catch { $('#photo-hint').textContent = '사진을 입히지 못했어요. 다른 사진으로 다시 시도해 주세요.'; }
   finally { button.disabled = false; }
 });
-$('#photo-back').addEventListener('click', () => { drawFaceList(); show('site'); });
+$('#photo-back').addEventListener('click', () => { drawFaceList(); show('facade'); });
 
-// ---------- 3. 결과 ----------
+// ---------- 4. 발전량 ----------
+function showResearchGeneration() {
+  applySpatialFacadeMasks();
+  const candidates = S.analysisGrid?.sensors || [], surfaces = S.analysisGrid?.surfaces || [];
+  const surfaceById = new Map(surfaces.map(surface => [surface.surface_id, surface]));
+  const totals = new Map();
+  const moduleDensity = S.params.module_kw_per_m2.value, performanceRatio = S.params.performance_ratio.value;
+  const threshold = S.params.min_annual_kwh_m2.value, fallback = 1 - S.params.default_opening_ratio.value;
+  for (const sensor of candidates) {
+    const annual = Number(sensor.annual_prediction_kwh_m2_year), surface = surfaceById.get(sensor.surface_id);
+    if (!surface || !Number.isFinite(annual)) continue;
+    const fullArea = Number(surface.surface_type === 'Roof' ? surface.area_m2 : surface.width_m * surface.height_m);
+    if (!Number.isFinite(fullArea) || fullArea <= 0) continue;
+    const cellArea = fullArea / Math.max(1, surface.sensor_count);
+    const available = surface.surface_type === 'Roof' ? 1 : (sensor.installable_fraction ?? fallback);
+    const row = totals.get(surface.surface_id) || {surface, area_m2: 0, kwh: 0, annualEnergy: 0, weightedArea: 0};
+    if (annual >= threshold) {
+      const area = cellArea * available;
+      row.area_m2 += area; row.weightedArea += area; row.annualEnergy += annual * area;
+      row.kwh += annual * area * moduleDensity * performanceRatio;
+    }
+    totals.set(surface.surface_id, row);
+  }
+  const faces = [...totals.values()].map(row => {
+    const faceId = row.surface.surface_id.replace(/^candidate:/, '');
+    const publicFace = S.publicSite?.faces.find(item => item.face_id === faceId);
+    return {...row, faceId, name: row.surface.surface_type === 'Roof' ? '지붕' : publicFace ? labelFace(publicFace) : faceId,
+      annual: row.weightedArea ? row.annualEnergy / row.weightedArea : 0,
+      kw: row.area_m2 * moduleDensity};
+  });
+  const total = faces.reduce((sum, row) => ({area_m2: sum.area_m2 + row.area_m2,
+    kw: sum.kw + row.kw, kwh: sum.kwh + row.kwh}), {area_m2: 0, kw: 0, kwh: 0});
+  $('#result-source').textContent = 'E2c 위치별 일사량과 사진 마스크를 결합한 발전량 사전 분석입니다.';
+  $('#payback-title').textContent = '발전량 산정 기준';
+  $('#verdict').innerHTML = `<span class="badge b-적합">분석 완료</span><p>설치 불가 위치를 제외한 가용 외피의 발전량입니다.</p>`;
+  $('#metrics').innerHTML = `<div><span>설치 가능 면적</span><b>${fmt(total.area_m2, 1)} ㎡</b></div>
+    <div><span>예상 설치 용량</span><b>${fmt(total.kw, 1)} kW</b></div>
+    <div><span>연간 발전량</span><b>${fmt(total.kwh)} kWh</b></div>`;
+  $('#payback').innerHTML = '<p class="pb-note">현재 단계는 위치별 일사량 기반 발전량 분석입니다. 전력요금과 실제 부하를 입력하면 경제성 분석을 확장할 수 있어요.</p>';
+  const [lo, hi] = S.researchOverview.annual_prediction_range_kwh_m2_year;
+  $('#face-result').innerHTML = faces.map(row => `<li><span class="swatch" style="background:${color(row.annual, lo, hi)}"></span>
+    <span>${esc(row.name)}<span class="sub">가용 ${fmt(row.area_m2, 1)}㎡ · 연 ${fmt(row.kwh)} kWh</span></span>
+    <span class="val">${fmt(row.kw, 1)} kW</span></li>`).join('');
+  $('.money').hidden = true;
+  const assumptions = ['E2c 위치별 연간 일사량 사용', '사진 마스크의 창문·문 위치 제외',
+    `모듈 용량밀도 ${moduleDensity} kW/㎡`, `성능비 ${performanceRatio}`, `연간 일사 ${threshold} kWh/㎡ 미만 위치 제외`];
+  $('#assumptions').innerHTML = assumptions.map(item => `<li>${esc(item)}</li>`).join('');
+  S.generationResult = {mode: 'research', total, faces, assumptions};
+}
+
 function showResult() {
+  if (S.mode === 'research') { showResearchGeneration(); show('generation'); return; }
   if (!S.irr) return;
   let r;
   try { r = evaluate({ site: S.site, irr: S.irr, params: S.params, cellsFrac: S.cellsFrac, annualKwh: null }); }
   catch (e) { $('#facade-status').textContent = e.message; return; }
   $('#result-source').textContent = S.site.source === 'public_api' ? '추정 분석 결과 · 계산에 쓴 가정과 한계를 확인하세요.' : '[가상 데모] 실제 주소의 분석 결과가 아니에요.';
+  $('#payback-title').textContent = '회수기간 비교';
   const t = r.total;
   $('#verdict').innerHTML = `<span class="badge b-${r.verdict}">${r.verdict}</span>
     <p>${esc(r.reasons[0])}</p>${r.reasons.length > 1 ? `<ul>${r.reasons.slice(1).map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}`;
@@ -926,13 +1046,33 @@ function showResult() {
     ['설치비', t.cost], ['보조금', -t.subsidy], ['대체 외장재 비용 (외피 연계 시)', -t.cladding],
     ['연간 절감액', t.saving], ['연간 전력 사용량 (kWh)', t.usage_kwh],
   ].map(([k, v]) => `<tr><td>${k}</td><td>${fmt(v)}${k.includes('kWh') ? '' : ' 원'}</td></tr>`).join('');
+  $('.money').hidden = false;
   $('#assumptions').innerHTML = r.assumptions.map(a => `<li>${esc(a)}</li>`).join('');
-  show('result');
+  S.generationResult = r;
+  show('generation');
 }
 
 $('#go-photo').addEventListener('click', openPhoto);
-$('#go-result').addEventListener('click', showResult);
-$('#again').addEventListener('click', () => { drawFaceList(); show('site'); });
+$('#lookup-next').addEventListener('click', () => { unlockStage('facade'); show('facade'); });
+$('#facade-prev').addEventListener('click', () => show('lookup'));
+$('#facade-next').addEventListener('click', () => {
+  unlockStage('solar'); show('solar');
+  if (S.mode === 'research') void loadResearchMonthly(selectedResearchGroup());
+});
+$('#solar-prev').addEventListener('click', () => show('facade'));
+$('#solar-next').addEventListener('click', () => { unlockStage('generation'); showResult(); });
+$('#generation-prev').addEventListener('click', () => show('solar'));
+function buildReportPreview() {
+  const address = S.researchAddress || S.site?.address || $('#loaded-building-name').textContent;
+  $('#report-preview').innerHTML = `<h2>SolarCheck 외피 태양광 사전진단</h2>
+    <p class="report-meta">${esc(address)} · ${new Date().toLocaleDateString('ko-KR')}</p>
+    <section class="report-section">${$('#verdict').innerHTML}</section>
+    <section class="report-section"><h3>발전량 요약</h3><div class="metrics">${$('#metrics').innerHTML}</div></section>
+    <section class="report-section"><h3>외피별 분석 결과</h3><ul class="faces result">${$('#face-result').innerHTML}</ul></section>`;
+}
+$('#generation-next').addEventListener('click', () => { buildReportPreview(); unlockStage('report'); show('report'); });
+$('#report-prev').addEventListener('click', () => show('generation'));
+$('#again').addEventListener('click', () => { drawFaceList(); show('facade'); });
 $('#print').addEventListener('click', () => print());
 addEventListener('beforeprint', () => document.querySelectorAll('details').forEach(d => { d.open = true; }));
 
@@ -946,7 +1086,8 @@ addEventListener('beforeprint', () => document.querySelectorAll('details').forEa
     if ($('#api-url').value) checkServer();
     $('#building-result').hidden = true;
     $('#lookup-submit').disabled = false;
-    show('site');
+    unlockStage('lookup');
+    show('lookup');
   } catch (err) {
     $('main').innerHTML = `<h1>데이터를 불러오지 못했어요</h1><p class="hint">${esc(err.message)}. 로컬에서는 docs 폴더에서 python -m http.server 로 띄워 주세요.</p>`;
   }

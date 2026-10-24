@@ -5,21 +5,27 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>솔라체크 · 외피 태양광 사전진단</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="style.css?v=20261024-pixel-mask">
-<script type="module" src="app.js?v=20261024-spatial-mask"></script>
+<link rel="stylesheet" href="style.css?v=20261024-five-stage">
+<script type="module" src="app.js?v=20261024-five-stage"></script>
 </head>
 <body>
 <header class="top">
-  <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="5" y="9" width="22" height="20" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 17h22M5 23h22M12 9v20M20 9v20" stroke="currentColor" stroke-width="1.2" opacity=".5"/><circle cx="23" cy="7" r="4.5" fill="var(--sun)"/></svg>
-  <span>솔라체크</span>
-  <ol class="steps" aria-label="진행 단계">
-    <li data-step="site">건물</li><li data-step="photo">입면</li><li data-step="result">결과</li>
-  </ol>
+  <div class="brand" aria-label="솔라체크"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="5" y="9" width="22" height="20" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 17h22M5 23h22M12 9v20M20 9v20" stroke="currentColor" stroke-width="1.2" opacity=".5"/><circle cx="23" cy="7" r="4.5" fill="var(--sun)"/></svg><span>솔라체크</span></div>
+  <nav class="workflow-nav" aria-label="분석 단계">
+    <button type="button" data-stage="lookup">건물조회</button>
+    <button type="button" data-stage="facade" disabled>입면설정</button>
+    <button type="button" data-stage="solar" disabled>일사예측</button>
+    <button type="button" data-stage="generation" disabled>발전량</button>
+    <button type="button" data-stage="report" disabled>결과보고서</button>
+  </nav>
+  <span class="header-spacer" aria-hidden="true"></span>
 </header>
 
 <main>
-  <section id="step-site" class="step">
-    <h1>우리 건물 외피 태양광 체크</h1>
+  <section id="step-lookup" class="step workflow-step">
+    <p class="step-kicker">1단계</p>
+    <h1>주소 기반 건축물 조회</h1>
+    <p class="hint">주소로 건축물대장과 주변 건물을 불러오고 3D 모델링을 준비합니다.</p>
     <details class="server-settings">
       <summary>연구실 PC 연결 설정</summary>
       <label class="field">분석 서버 주소<input id="api-url" type="url" placeholder="https://…trycloudflare.com" autocomplete="off"></label>
@@ -37,13 +43,22 @@
     <p id="building-search-note" class="hint" role="status">연구 대상지 내부의 도로명주소를 입력하면 건축물대장 정보와 연구 일사량을 함께 불러와요.</p>
     <div id="lookup-choices" class="lookup-choices" hidden></div>
     <div id="building-result" hidden>
-    <h2 id="loaded-building-name"></h2>
-    <h3 id="registry-info-title" class="info-title">건축물대장 정보</h3>
-    <dl id="site-info" class="info"></dl>
-    <div id="public-data-details" hidden>
-      <details><summary>조회 출처와 확인할 사항</summary><p id="data-source" class="hint"></p><ul id="lookup-warnings"></ul></details>
-      <details><summary id="neighbor-summary">주변 건물 정보</summary><p class="hint">반경은 입력 주소 좌표를 기준으로 해요. 거리는 대상과 주변 건물 외곽 사이의 최단거리예요. 층수 × 3.3m로 만든 높이는 추정값이에요.</p><div class="table-scroll"><table id="neighbor-table"></table></div></details>
+      <h2 id="loaded-building-name"></h2>
+      <h3 id="registry-info-title" class="info-title">건축물대장 정보</h3>
+      <dl id="site-info" class="info"></dl>
+      <div id="public-data-details" hidden>
+        <details><summary>조회 출처와 확인할 사항</summary><p id="data-source" class="hint"></p><ul id="lookup-warnings"></ul></details>
+        <details><summary id="neighbor-summary">주변 건물 정보</summary><p class="hint">반경은 입력 주소 좌표를 기준으로 해요. 거리는 대상과 주변 건물 외곽 사이의 최단거리예요. 층수 × 3.3m로 만든 높이는 추정값이에요.</p><div class="table-scroll"><table id="neighbor-table"></table></div></details>
+      </div>
+      <div class="actions"><button id="lookup-next" class="primary" type="button" disabled>3D 모델에서 입면 설정하기</button></div>
     </div>
+  </section>
+
+  <section id="step-facade" class="step workflow-step" hidden>
+    <p class="step-kicker">2단계</p>
+    <h1>3D 모델·입면 설정</h1>
+    <p class="hint">모델을 돌려 분석할 입면을 선택하세요. 사진 마스크를 추가하면 창문·문 위치가 이후 계산에서 제외됩니다.</p>
+    <div id="facade-panel">
     <figure class="building-model">
       <canvas id="building-canvas" tabindex="0" aria-label="건물 3D 입면 보기. 드래그 또는 방향키로 회전하고 휠이나 더하기·빼기 키로 확대하세요."></canvas>
       <figcaption id="building-caption">건물을 돌려 보고 사진을 붙일 벽면을 선택하세요.</figcaption>
@@ -61,25 +76,15 @@
     <p id="facade-status" class="hint" role="status">입면 사진은 건물·방향별로 이 기기의 브라우저에 저장돼요.</p>
     <h2 id="face-list-title">사진을 촬영·적용할 입면을 고르세요</h2>
     <ul id="face-list" class="faces"></ul>
-    <section id="research-monthly-panel" class="research-monthly" hidden>
-      <h2 id="research-monthly-title">입면별 월평균 일사량</h2>
-      <p id="research-monthly-summary" class="hint"></p>
-      <div id="research-monthly-chart" class="research-monthly-chart" role="img" aria-label="1월부터 12월까지 월평균 일사량 막대 차트"></div>
-      <p id="research-monthly-status" class="hint" role="status"></p>
-    </section>
-    <details id="irradiance-grid" hidden>
-      <summary id="irradiance-grid-title">선택 입면의 격자별 연간 일사량</summary>
-      <p id="irradiance-grid-note" class="hint"></p>
-      <canvas id="irradiance-canvas" aria-label="격자별 연간 일사량. 칸을 누르면 수치가 표시돼요."></canvas>
-      <output id="irradiance-cell-value" class="hint" aria-live="polite"></output>
-    </details>
-    <p id="surrogate-status" class="hint" role="status">실제 주소의 분석 가능 여부는 연구실 PC 연결 후 확인해요.</p>
     <div id="building-actions" class="actions">
       <button id="go-photo" class="primary" disabled>선택한 입면 사진 촬영·선택</button>
       <button id="remove-photo" class="ghost" hidden>선택한 입면 사진 지우기</button>
-      <button id="go-result" class="ghost">사진 없이 결과 보기</button>
       <button id="check-surrogate" class="ghost" type="button">일사량 모델 상태 확인</button>
     </div>
+    </div>
+    <div class="step-navigation">
+      <button id="facade-prev" class="ghost" type="button">건물조회로</button>
+      <button id="facade-next" class="primary" type="button" disabled>일사량 예측하기</button>
     </div>
   </section>
 
@@ -118,15 +123,41 @@
     <div class="actions">
       <button id="photo-reset" class="ghost" hidden>모서리 다시 지정</button>
       <button id="photo-done" class="primary" disabled>이 입면에 사진 입히기</button>
-      <button id="photo-back" class="ghost">건물로 돌아가기</button>
+      <button id="photo-back" class="ghost">입면 설정으로 돌아가기</button>
     </div>
   </section>
 
-  <section id="step-result" class="step" hidden>
+  <section id="step-solar" class="step workflow-step" hidden>
+    <p class="step-kicker">3단계</p>
+    <h1>입면 일사량 예측</h1>
+    <p class="hint">선택한 입면과 가용 벽면 위치를 기준으로 연평균·월평균 일사량을 확인합니다.</p>
+    <ul id="solar-face-list" class="faces"></ul>
+    <section id="research-monthly-panel" class="research-monthly" hidden>
+      <h2 id="research-monthly-title">입면별 월평균 일사량</h2>
+      <p id="research-monthly-summary" class="hint"></p>
+      <div id="research-monthly-chart" class="research-monthly-chart" role="img" aria-label="1월부터 12월까지 월평균 일사량 막대 차트"></div>
+      <p id="research-monthly-status" class="hint" role="status"></p>
+    </section>
+    <details id="irradiance-grid" hidden>
+      <summary id="irradiance-grid-title">선택 입면의 격자별 연간 일사량</summary>
+      <p id="irradiance-grid-note" class="hint"></p>
+      <canvas id="irradiance-canvas" aria-label="격자별 연간 일사량. 칸을 누르면 수치가 표시돼요."></canvas>
+      <output id="irradiance-cell-value" class="hint" aria-live="polite"></output>
+    </details>
+    <p id="surrogate-status" class="hint" role="status">일사량 예측 결과를 준비하고 있어요.</p>
+    <div class="step-navigation">
+      <button id="solar-prev" class="ghost" type="button">입면설정으로</button>
+      <button id="solar-next" class="primary" type="button" disabled>발전량 분석하기</button>
+    </div>
+  </section>
+
+  <section id="step-generation" class="step workflow-step" hidden>
+    <p class="step-kicker">4단계</p>
+    <h1>발전량 분석</h1>
     <p id="result-source" class="hint"></p>
     <div id="verdict" class="verdict"></div>
     <div id="metrics" class="metrics"></div>
-    <h2>회수기간 비교</h2>
+    <h2 id="payback-title">회수기간 비교</h2>
     <div id="payback" class="payback"></div>
     <h2>어디에 붙이면 좋을까요</h2>
     <ul id="face-result" class="faces result"></ul>
@@ -134,19 +165,27 @@
       <summary>비용 계산 근거</summary>
       <table id="money"></table>
     </details>
+    <div class="step-navigation">
+      <button id="generation-prev" class="ghost" type="button">일사예측으로</button>
+      <button id="generation-next" class="primary" type="button">결과 보고서 보기</button>
+    </div>
+  </section>
+
+  <section id="step-report" class="step workflow-step" hidden>
+    <p class="step-kicker">5단계</p>
+    <h1>결과 레포트 프리뷰</h1>
+    <article id="report-preview" class="report-preview"></article>
     <h2>이 건물에 맞는 지원사업</h2>
     <ul class="programs">
       <li><b>그린리모델링 이자지원</b>외피 공사비 대출 이자 지원</li>
       <li><b>그린리모델링 컨설팅</b>전문가 현장 진단 연결</li>
       <li><b>신재생에너지 건물지원</b>태양광 설치비 보조</li>
     </ul>
-    <details class="assume">
-      <summary>계산에 쓴 가정</summary>
-      <ul id="assumptions"></ul>
-    </details>
+    <details class="assume"><summary>계산에 쓴 가정</summary><ul id="assumptions"></ul></details>
     <div class="actions">
       <button id="print" class="primary">리포트 저장 (PDF)</button>
-      <button id="again" class="ghost">다른 입면 촬영하기</button>
+      <button id="report-prev" class="ghost" type="button">발전량 분석으로</button>
+      <button id="again" class="ghost">입면 다시 설정하기</button>
     </div>
   </section>
 </main>

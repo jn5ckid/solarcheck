@@ -8,9 +8,10 @@ from fastapi import HTTPException
 
 from backend.surrogate import (facade_sensors, aggregate_cells, soft_visibility,
                                predict_research_sensors, predict_research_sensors_at_hours, status)
-from backend.main import (BuildingLookup, analyze_irradiance,
+from backend.main import (BuildingLookup, MaskedMonthlyRequest, SensorWeight, analyze_irradiance,
                           research_site_sensor_irradiance, _predict_candidate_grid,
-                          _predict_monthly_irradiance)
+                          _predict_monthly_irradiance, research_site_masked_monthly_irradiance,
+                          research_monthly_predictions)
 
 
 class SurrogateTests(unittest.TestCase):
@@ -115,6 +116,35 @@ class SurrogateTests(unittest.TestCase):
         self.assertAlmostEqual(result['series'][1]['irradiance_kwh_m2_month'], 134.4)
         self.assertAlmostEqual(result['annual_mean_kwh_m2_year'], 1752.0)
         self.assertEqual(predictor.call_args.kwargs['coordinate_frame'], 'original-research-local')
+
+    def test_monthly_prediction_uses_spatial_mask_weights(self):
+        sensor = {
+            'building_id': 'B0', 'surface_group_id': 'B0:F:A180:T090',
+            'x': 0, 'y': 0, 'z': 5, 'nx': 0, 'ny': -1, 'nz': 0,
+            **{f'horizon_{key}': 0 for key in ('n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw')},
+        }
+        prediction = np.ones((2, 8760), dtype=np.float32) * np.array([[100], [300]], dtype=np.float32)
+        with patch('backend.main.predict_research_sensors', return_value=prediction):
+            result = _predict_monthly_irradiance([sensor, sensor], [1, 0])
+        self.assertAlmostEqual(result['series'][0]['irradiance_kwh_m2_month'], 74.4)
+        self.assertAlmostEqual(result['annual_mean_kwh_m2_year'], 876.0)
+
+    def test_masked_monthly_endpoint_excludes_zero_weight_sensor_positions(self):
+        sensors = [
+            {'sensor_row_index': 1, 'building_id': 'B0', 'surface_group_id': 'face'},
+            {'sensor_row_index': 2, 'building_id': 'B0', 'surface_group_id': 'face'},
+        ]
+        request = MaskedMonthlyRequest(surface_group_id='face', sensor_weights=[
+            SensorWeight(sensor_row_index=1, available_fraction=1),
+            SensorWeight(sensor_row_index=2, available_fraction=0),
+        ])
+        research_monthly_predictions.clear()
+        with patch('backend.main.research_site.monthly_inference_sensors', return_value=sensors), \
+                patch('backend.main._predict_monthly_irradiance', return_value={'series': [], 'annual_mean_kwh_m2_year': 500}) as predictor:
+            result = research_site_masked_monthly_irradiance('B0', request)
+        predictor.assert_called_once_with([sensors[0]], [1.0])
+        self.assertTrue(result['mask_applied'])
+        self.assertEqual(result['available_fraction'], .5)
 
     @unittest.skipUnless(importlib.util.find_spec('torch'), 'Optional PyTorch not installed')
     def test_e2c_physics_day_night_and_vertical_diffuse(self):

@@ -54,6 +54,16 @@ class BuildingLookup(BaseModel):
     record_id: str | None = Field(default=None, max_length=100)
 
 
+class SensorWeight(BaseModel):
+    sensor_row_index: int = Field(ge=0)
+    available_fraction: float = Field(ge=0, le=1)
+
+
+class MaskedMonthlyRequest(BaseModel):
+    surface_group_id: str | None = Field(default=None, max_length=200)
+    sensor_weights: list[SensorWeight] = Field(min_length=1, max_length=2000)
+
+
 @app.get('/api/config')
 def public_config():
     config = settings()
@@ -187,7 +197,7 @@ def research_site_sensor_irradiance(
     }
 
 
-def _predict_monthly_irradiance(sensors: list[dict]) -> dict:
+def _predict_monthly_irradiance(sensors: list[dict], weights: list[float] | None = None) -> dict:
     xyz = [[sensor[key] for key in ('x', 'y', 'z')] for sensor in sensors]
     normals = [[sensor[key] for key in ('nx', 'ny', 'nz')] for sensor in sensors]
     horizons = [[sensor[key] for key in (
@@ -197,10 +207,15 @@ def _predict_monthly_irradiance(sensors: list[dict]) -> dict:
     hourly = predict_research_sensors(
         xyz, normals, horizons, coordinate_frame='original-research-local'
     )
+    weight_array = np.ones(len(sensors), dtype=np.float64) if weights is None else np.asarray(weights, dtype=np.float64)
+    if weight_array.shape != (len(sensors),) or not np.isfinite(weight_array).all() or (weight_array < 0).any() or weight_array.sum() <= 0:
+        raise ValueError('가용 입면 위치 가중치가 올바르지 않아요.')
     month_start_days = (0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365)
-    monthly = [float(hourly[:, month_start_days[month - 1] * 24:month_start_days[month] * 24]
-                     .sum(axis=1, dtype=np.float64).mean() / 1000.0)
-               for month in range(1, 13)]
+    monthly = [float(np.average(
+        hourly[:, month_start_days[month - 1] * 24:month_start_days[month] * 24]
+        .sum(axis=1, dtype=np.float64) / 1000.0,
+        weights=weight_array,
+    )) for month in range(1, 13)]
     return {
         'status': 'predicted',
         'model': 'E2c',
@@ -246,6 +261,55 @@ def research_site_monthly_irradiance(
         raise HTTPException(status_code=409, detail={
             'code': 'RESEARCH_SENSOR_INPUT_REJECTED', 'message': str(error),
         }) from None
+    _bounded_remember(research_monthly_predictions, cache_key, result)
+    return result
+
+
+@app.post('/api/research-site/buildings/{building_id}/monthly-irradiance/masked')
+def research_site_masked_monthly_irradiance(building_id: str, request: MaskedMonthlyRequest):
+    if not 1 <= len(building_id) <= 100:
+        raise HTTPException(status_code=422, detail={'code': 'INVALID_BUILDING_ID', 'message': '건물 ID 형식을 확인해 주세요.'})
+    if request.surface_group_id is not None and not 1 <= len(request.surface_group_id) <= 200:
+        raise HTTPException(status_code=422, detail={'code': 'INVALID_SURFACE_GROUP_ID', 'message': '표면 그룹 ID 형식을 확인해 주세요.'})
+    sensors = _research_site_call(
+        research_site.monthly_inference_sensors, building_id, request.surface_group_id
+    )
+    provided = {item.sensor_row_index: float(item.available_fraction) for item in request.sensor_weights}
+    expected = {int(sensor['sensor_row_index']) for sensor in sensors}
+    if len(provided) != len(request.sensor_weights) or set(provided) != expected:
+        raise HTTPException(status_code=422, detail={
+            'code': 'MASK_SENSOR_MISMATCH',
+            'message': '사진 마스크와 연구 입면 센서 위치가 일치하지 않아요.',
+        })
+    active = [(sensor, provided[int(sensor['sensor_row_index'])]) for sensor in sensors
+              if provided[int(sensor['sensor_row_index'])] > 0]
+    if not active:
+        raise HTTPException(status_code=422, detail={
+            'code': 'NO_AVAILABLE_FACADE_AREA',
+            'message': '마스크를 제외하고 남은 입면 분석 위치가 없어요.',
+        })
+    signature = ','.join(
+        f'{sensor_id}:{provided[sensor_id]:.4f}' for sensor_id in sorted(provided)
+    )
+    cache_key = f'masked:{building_id}:{request.surface_group_id or "all"}:{signature}'
+    cached = research_monthly_predictions.get(cache_key)
+    if cached is not None:
+        research_monthly_predictions.move_to_end(cache_key)
+        return cached
+    try:
+        result = _predict_monthly_irradiance(
+            [item[0] for item in active], [item[1] for item in active]
+        )
+    except SurrogateUnavailable as error:
+        raise HTTPException(status_code=503, detail={
+            'code': 'RESEARCH_MODEL_UNAVAILABLE', 'message': str(error),
+        }) from None
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail={
+            'code': 'RESEARCH_SENSOR_INPUT_REJECTED', 'message': str(error),
+        }) from None
+    result['mask_applied'] = True
+    result['available_fraction'] = float(sum(provided.values()) / len(provided))
     _bounded_remember(research_monthly_predictions, cache_key, result)
     return result
 

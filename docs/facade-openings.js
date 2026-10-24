@@ -47,6 +47,67 @@ export function paintMask(mask, width, height, cx, cy, radius, value) {
   }
 }
 
+const uniqueSorted = values => [...values].sort((a, b) => a - b)
+  .filter((value, index, array) => !index || Math.abs(value - array[index - 1]) > 1e-4);
+
+const typicalStep = values => {
+  const unique = uniqueSorted(values);
+  if (unique.length < 2) return 1;
+  const gaps = unique.slice(1).map((value, index) => value - unique[index]).sort((a, b) => a - b);
+  return gaps[Math.floor(gaps.length / 2)] || 1;
+};
+
+/** Map a photo-space opening mask to the actual facade sensor patches. */
+export function sensorAvailabilitiesFromMask(mask, width, height, sensors) {
+  if (!mask || mask.length !== width * height || !(width > 0) || !(height > 0)) {
+    throw new Error('센서에 대응할 개구부 마스크를 확인해 주세요.');
+  }
+  if (!Array.isArray(sensors) || !sensors.length) return [];
+  const normalLength = Math.hypot(
+    sensors.reduce((sum, sensor) => sum + Number(sensor.nx || 0), 0),
+    sensors.reduce((sum, sensor) => sum + Number(sensor.ny || 0), 0),
+  );
+  if (!(normalLength > 0)) throw new Error('입면 센서의 표면 방향을 확인해 주세요.');
+  const nx = sensors.reduce((sum, sensor) => sum + Number(sensor.nx || 0), 0) / normalLength;
+  const ny = sensors.reduce((sum, sensor) => sum + Number(sensor.ny || 0), 0) / normalLength;
+  // Looking at the facade from outside, screen-right is (-ny, nx).
+  const samples = sensors.map(sensor => ({
+    along: Number(sensor.x) * -ny + Number(sensor.y) * nx,
+    z: Number(sensor.z),
+  }));
+  if (samples.some(sample => !Number.isFinite(sample.along) || !Number.isFinite(sample.z))) {
+    throw new Error('입면 센서 좌표를 확인해 주세요.');
+  }
+  const alongStep = typicalStep(samples.map(sample => sample.along));
+  const zStep = typicalStep(samples.map(sample => sample.z));
+  const alongMin = Math.min(...samples.map(sample => sample.along)) - alongStep / 2;
+  const alongMax = Math.max(...samples.map(sample => sample.along)) + alongStep / 2;
+  const zMin = Math.min(...samples.map(sample => sample.z)) - zStep / 2;
+  const zMax = Math.max(...samples.map(sample => sample.z)) + zStep / 2;
+  const px = value => Math.max(0, Math.min(width, Math.round((value - alongMin) / (alongMax - alongMin) * width)));
+  const py = value => Math.max(0, Math.min(height, Math.round((zMax - value) / (zMax - zMin) * height)));
+  return samples.map(sample => {
+    const x0 = px(sample.along - alongStep / 2), x1 = px(sample.along + alongStep / 2);
+    const y0 = py(sample.z + zStep / 2), y1 = py(sample.z - zStep / 2);
+    let openings = 0, count = 0;
+    for (let y = y0; y < Math.max(y0 + 1, y1); y++) for (let x = x0; x < Math.max(x0 + 1, x1); x++) {
+      openings += mask[Math.min(height - 1, y) * width + Math.min(width - 1, x)] / 255; count++;
+    }
+    return Math.max(0, Math.min(1, 1 - openings / Math.max(1, count)));
+  });
+}
+
+export function cellFractionsToMask(cells, ns, nt) {
+  if (!Array.isArray(cells) || cells.length !== ns * nt || ns < 1 || nt < 1) {
+    throw new Error('저장된 입면 설치 가능 비율을 확인해 주세요.');
+  }
+  const mask = new Uint8ClampedArray(ns * nt);
+  for (let t = 0; t < nt; t++) for (let s = 0; s < ns; s++) {
+    mask[(nt - 1 - t) * ns + s] = Math.round((1 - cells[t * ns + s]) * 255);
+  }
+  return {mask, width: ns, height: nt};
+}
+
 /**
  * Lightweight facade-opening proposal generator.
  *

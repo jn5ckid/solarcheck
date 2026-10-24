@@ -1,9 +1,9 @@
 import { evaluate, faceName, openingRatio } from './calc.js?v=20261024-research-cleanup';
-import { FacadeViewer } from './facade-viewer.js?v=20261024-research-cleanup';
+import { FacadeViewer } from './facade-viewer.js?v=20261024-spatial-mask';
 import { clampImagePoint, nearestCornerIndex, rectifiedSizeFromCorners, validateCorners } from './facade-geometry.js?v=20261024-pixel-mask';
 import { loadFacades, saveFacade, removeFacade } from './facade-store.js';
-import { analyzeFacadeOpenings, closestFacadeByAzimuth, maskToCellFractions,
-  openingRatioFromMask, paintMask } from './facade-openings.js?v=20261024-pixel-mask';
+import { analyzeFacadeOpenings, cellFractionsToMask, closestFacadeByAzimuth, maskToCellFractions,
+  openingRatioFromMask, paintMask, sensorAvailabilitiesFromMask } from './facade-openings.js?v=20261024-spatial-mask';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
@@ -14,7 +14,7 @@ const MAX_SRC = 1600;    // 사진 긴 변 최대 px
 const S = { params: null, site: null, irr: null, face: null, cellsFrac: {}, img: null, corners: [], cells: null,
   textures: {}, mode: 'site', publicSite: null, researchOverview: null, researchBuilding: null, researchSensors: [], researchGroup: null,
   researchMonthly: null, researchAddress: null, analysisGrid: null, candidatePrediction: null, dragCorner: null,
-  mask: null, maskMode: 'opening', maskPointer: null, brushRadius: 28 };
+  mask: null, maskMode: 'opening', maskPointer: null, brushRadius: 28, facadeMasks: {} };
 const viewer = new FacadeViewer($('#building-canvas'), id => pickFace(id), sensor => showResearchSensor(sensor));
 let siteLoadVersion = 0;
 
@@ -85,12 +85,25 @@ async function restoreFacadePhotos(site) {
       || !/^data:image\/(jpeg|png);base64,/.test(record.dataUrl)) return null;
     try {
       const image = new Image(); image.src = record.dataUrl; await image.decode();
-      return {record, image};
+      let storedMask = null;
+      if (/^data:image\/png;base64,/.test(record.maskDataUrl || '')) {
+        try {
+          const maskImage = new Image(); maskImage.src = record.maskDataUrl; await maskImage.decode();
+          const canvas = document.createElement('canvas'); canvas.width = maskImage.naturalWidth; canvas.height = maskImage.naturalHeight;
+          const context = canvas.getContext('2d'); context.drawImage(maskImage, 0, 0);
+          const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+          const mask = new Uint8ClampedArray(canvas.width * canvas.height);
+          for (let i = 0; i < mask.length; i++) mask[i] = pixels[i * 4];
+          storedMask = {mask, width: canvas.width, height: canvas.height};
+        } catch { /* Older or damaged mask records fall back to the saved spatial cells. */ }
+      }
+      return {record, image, storedMask};
     } catch { return null; }
   }));
   for (const entry of restored.filter(Boolean)) {
     S.textures[entry.record.faceId] = {image: entry.image, dataUrl: entry.record.dataUrl};
     S.cellsFrac[entry.record.faceId] = entry.record.cells;
+    if (entry.storedMask) S.facadeMasks[entry.record.faceId] = entry.storedMask;
   }
   viewer.setPhotos(S.textures);
   return {storageAvailable, count: Object.keys(S.textures).length};
@@ -103,7 +116,7 @@ async function displaySite(site, irr, version = ++siteLoadVersion) {
   S.mode = 'site'; S.site = site; S.publicSite = site; S.irr = irr; S.researchBuilding = null; S.researchSensors = []; S.researchGroup = null;
   S.researchAddress = null;
   S.researchMonthly = null; $('#research-monthly-panel').hidden = true;
-  S.face = null; S.cellsFrac = {}; S.textures = {};
+  S.face = null; S.cellsFrac = {}; S.textures = {}; S.facadeMasks = {};
   viewer.setSite(site); viewer.setContext($('#model-context').checked);
   $('#model-draft').checked = false; $('#model-draft').disabled = true;
   $('#model-heatmap').checked = false; $('#model-heatmap').disabled = true;
@@ -208,11 +221,12 @@ $('#remove-photo').addEventListener('click', async () => {
   try { await removeFacade(siteId, id); }
   catch { $('#facade-status').textContent = '저장된 사진을 지우지 못했어요. 다시 시도해 주세요.'; return; }
   if (photoSite()?.site_id !== siteId) return;
-  delete S.textures[id]; delete S.cellsFrac[id];
+  delete S.textures[id]; delete S.cellsFrac[id]; delete S.facadeMasks[id];
   viewer.setPhotos(S.textures); drawFaceList();
   if (S.mode === 'research') {
     $('#remove-photo').hidden = true;
     $('#facade-status').textContent = `${photoFaceLabel()} 사진과 자동 판별 결과를 지웠어요.`;
+    S.researchMonthly = null; void loadResearchMonthly(selectedResearchGroup());
   } else {
     pickFace(id);
     if (S.irr) $('#go-result').textContent = Object.keys(S.textures).length ? '데모 진단 결과 보기' : '사진 없이 데모 결과 보기';
@@ -268,8 +282,8 @@ $('#check-surrogate').addEventListener('click', checkSurrogate);
 
 // Frozen original-research-site data is loaded only after a public address match.
 let researchVersion = 0;
-async function researchJSON(path, signal) {
-  const r = await fetch(`${rememberServer()}${path}`, {signal});
+async function researchJSON(path, signal, options = {}) {
+  const r = await fetch(`${rememberServer()}${path}`, {...options, signal});
   const data = await r.json();
   if (!r.ok) throw new Error(data.detail?.message || `연구 대상지 자료를 불러오지 못했어요 (${r.status}).`);
   return data;
@@ -328,7 +342,7 @@ async function loadResearchBuilding(buildingId, context = {}) {
     S.mode = 'research'; S.site = null; S.publicSite = context.publicSite || null; S.irr = null; S.face = null; S.researchBuilding = building;
     S.researchSensors = sensors; S.researchGroup = null; S.researchMonthly = null;
     S.researchAddress = context.address || null; S.analysisGrid = context.analysisGrid || null; S.candidatePrediction = null; ++researchMonthlyVersion;
-    S.cellsFrac = {}; S.textures = {};
+    S.cellsFrac = {}; S.textures = {}; S.facadeMasks = {};
     if (S.publicSite) await restoreFacadePhotos(S.publicSite);
     if (version !== researchVersion) return;
     const requestedRadius = Number(context.radiusM);
@@ -375,21 +389,68 @@ async function loadResearchBuilding(buildingId, context = {}) {
     if (candidateCount && S.publicSite?.site_id) await predictCandidateGrid(S.publicSite.site_id, version);
   }
 }
+
+function facadeMaskSource(faceId) {
+  if (S.facadeMasks[faceId]) return S.facadeMasks[faceId];
+  const publicFace = S.publicSite?.faces.find(item => item.face_id === faceId);
+  const cells = S.cellsFrac[faceId];
+  return publicFace && cells ? cellFractionsToMask(cells, publicFace.ns, publicFace.nt) : null;
+}
+
+function researchWeightEntries(group = null) {
+  const groups = group ? [group] : (S.researchBuilding?.surface_groups || []);
+  return groups.flatMap(item => {
+    const sensors = S.researchSensors.filter(sensor => sensor.surface_group_id === item.surface_group_id);
+    const mappedFace = researchPhotoFace(item), source = mappedFace && facadeMaskSource(mappedFace.face_id);
+    const weights = source && item.surface_type !== 'Roof'
+      ? sensorAvailabilitiesFromMask(source.mask, source.width, source.height, sensors)
+      : sensors.map(() => 1);
+    return sensors.map((sensor, index) => ({sensor, available_fraction: weights[index], masked: Boolean(source)}));
+  });
+}
+
+function weightedResearchAnnual(entries) {
+  const weight = entries.reduce((sum, entry) => sum + entry.available_fraction, 0);
+  return weight > 0 ? entries.reduce((sum, entry) =>
+    sum + entry.sensor.annual_prediction_kwh_m2_year * entry.available_fraction, 0) / weight : null;
+}
+
+function applySpatialFacadeMasks() {
+  if (!S.researchBuilding) return;
+  for (const entry of researchWeightEntries()) {
+    if (entry.masked) entry.sensor.installable_fraction = entry.available_fraction;
+    else delete entry.sensor.installable_fraction;
+  }
+  for (const surface of S.analysisGrid?.surfaces || []) {
+    if (surface.surface_type === 'Roof') continue;
+    const faceId = surface.surface_id.replace(/^candidate:/, '');
+    const source = facadeMaskSource(faceId);
+    const sensors = (S.analysisGrid?.sensors || []).filter(sensor => sensor.surface_id === surface.surface_id);
+    if (!source) { sensors.forEach(sensor => delete sensor.installable_fraction); continue; }
+    const weights = sensorAvailabilitiesFromMask(source.mask, source.width, source.height, sensors);
+    sensors.forEach((sensor, index) => { sensor.installable_fraction = weights[index]; });
+  }
+  viewer.draw();
+}
+
 function drawResearchGroups() {
   if (!S.researchBuilding) return;
   const [lo, hi] = S.researchOverview.annual_prediction_range_kwh_m2_year;
   const groups = S.researchBuilding.surface_groups;
-  const buildingMean = mean(S.researchSensors.map(sensor => sensor.annual_prediction_kwh_m2_year));
+  applySpatialFacadeMasks();
+  const buildingMean = weightedResearchAnnual(researchWeightEntries());
   $('#face-list').innerHTML = `<li><button data-research-group="" aria-controls="research-monthly-panel" aria-pressed="${S.researchGroup === null}">
     <span class="swatch research-all"></span><span>건물 전체 평균<span class="sub">지붕·입면 종합</span></span>
     <span class="val">${fmt(buildingMean)}<span class="sub">kWh/㎡·년</span></span></button></li>`
     + groups.map(group => {
-      const mappedFace = researchPhotoFace(group), mask = mappedFace && S.cellsFrac[mappedFace.face_id];
-      const photoNote = mask ? ` · 창문·문 ${Math.round((1 - mean(mask)) * 100)}% 반영` : '';
+      const entries = researchWeightEntries(group), masked = entries.some(entry => entry.masked);
+      const available = entries.length ? mean(entries.map(entry => entry.available_fraction)) : 0;
+      const annual = weightedResearchAnnual(entries);
+      const photoNote = masked ? ` · 개구부 위치 제외 · 가용면 ${Math.round(available * 100)}%` : '';
       return `<li><button data-research-group="${esc(group.surface_group_id)}" aria-controls="research-monthly-panel" aria-pressed="${S.researchGroup === group.surface_group_id}">
-      <span class="swatch" style="background:${color(group.annual_prediction_mean, lo, hi)}"></span>
+      <span class="swatch" style="background:${color(annual, lo, hi)}"></span>
       <span>${researchSurfaceLabel(group)}<span class="sub">방위 ${fmt(group.normal_azimuth_bin_deg)}° · 경사 ${fmt(group.normal_tilt_bin_deg)}°${photoNote}</span></span>
-      <span class="val">${fmt(group.annual_prediction_mean)}<span class="sub">kWh/㎡·년</span></span></button></li>`;
+      <span class="val">${fmt(annual)}<span class="sub">kWh/㎡·년</span></span></button></li>`;
     }).join('');
   $('#face-list').querySelectorAll('[data-research-group]').forEach(button => button.addEventListener('click', () => {
     S.researchGroup = button.dataset.researchGroup || null;
@@ -402,8 +463,9 @@ function drawResearchGroups() {
       ? `${researchSurfaceLabel(selectedGroup)} 사진 ${S.textures[mappedFace.face_id] ? '촬영·교체' : '촬영·선택'}`
       : selectedGroup?.surface_type === 'Roof' ? '지붕 사진 분석은 지원하지 않아요' : '입면을 선택하면 사진을 분석할 수 있어요';
     $('#remove-photo').hidden = !mappedFace || !S.textures[mappedFace.face_id];
+    const selectedAnnual = selectedGroup ? weightedResearchAnnual(researchWeightEntries(selectedGroup)) : buildingMean;
     $('#facade-status').textContent = selectedGroup
-      ? `${researchSurfaceLabel(selectedGroup)} · 연평균 ${fmt(selectedGroup.annual_prediction_mean)} kWh/㎡·년`
+      ? `${researchSurfaceLabel(selectedGroup)} · 가용 위치 연평균 ${fmt(selectedAnnual)} kWh/㎡·년`
       : `건물 전체 평균 · ${fmt(buildingMean)} kWh/㎡·년`;
     void loadResearchMonthly(selectedGroup || null);
   }));
@@ -424,11 +486,18 @@ async function loadResearchMonthly(group) {
   $('#research-monthly-chart').innerHTML = '';
   $('#research-monthly-status').textContent = '월별 일사량을 계산하고 있어요…';
   try {
+    const entries = researchWeightEntries(group || null), masked = entries.some(entry => entry.masked);
     const query = groupId ? `?surface_group_id=${encodeURIComponent(groupId)}` : '';
-    const data = await researchJSON(
-      `/api/research-site/buildings/${encodeURIComponent(buildingId)}/monthly-irradiance${query}`,
-      AbortSignal.timeout(180000),
-    );
+    const path = masked
+      ? `/api/research-site/buildings/${encodeURIComponent(buildingId)}/monthly-irradiance/masked`
+      : `/api/research-site/buildings/${encodeURIComponent(buildingId)}/monthly-irradiance${query}`;
+    const options = masked ? {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({surface_group_id: groupId,
+        sensor_weights: entries.map(entry => ({sensor_row_index: entry.sensor.sensor_row_index,
+          available_fraction: entry.available_fraction}))}),
+    } : {};
+    const data = await researchJSON(path, AbortSignal.timeout(180000), options);
     if (version !== researchMonthlyVersion || S.researchGroup !== groupId) return;
     S.researchMonthly = data;
     renderResearchMonthly(data, label);
@@ -445,8 +514,8 @@ function renderResearchMonthly(data, label) {
     const value = row.irradiance_kwh_m2_month;
     return `<div class="research-monthly-bar" data-month="${row.month}월" data-value="${fmt(value, 1)}" title="${row.month}월 ${fmt(value, 1)} kWh/㎡·월" style="--bar-height:${Math.max(2, value / peak * 100)}%;--bar-color:${color(value, 0, peak)}"></div>`;
   }).join('');
-  $('#research-monthly-summary').textContent = `${label} · 연간 합계 ${fmt(data.annual_mean_kwh_m2_year, 1)} kWh/㎡·년`;
-  $('#research-monthly-status').textContent = `${data.weather} · 단위 kWh/㎡·월`;
+  $('#research-monthly-summary').textContent = `${label} · ${data.mask_applied ? '개구부 위치 제외 후 ' : ''}연간 합계 ${fmt(data.annual_mean_kwh_m2_year, 1)} kWh/㎡·년`;
+  $('#research-monthly-status').textContent = `${data.weather} · 단위 kWh/㎡·월${data.mask_applied ? ' · 픽셀 마스크를 센서 위치별로 적용' : ''}`;
 }
 
 function renderPublicData(data) {
@@ -779,6 +848,17 @@ $('#rect-canvas').addEventListener('pointerup', e => finishMaskStroke(e.currentT
 $('#rect-canvas').addEventListener('pointercancel', e => finishMaskStroke(e.currentTarget, e));
 $('#rect-canvas').addEventListener('pointerleave', () => { if (!S.maskPointer && S.mask) drawMask(); });
 
+function maskDataUrl(mask, width, height) {
+  const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
+  const context = canvas.getContext('2d'), image = context.createImageData(width, height);
+  for (let i = 0; i < mask.length; i++) {
+    const offset = i * 4, value = mask[i];
+    image.data[offset] = value; image.data[offset + 1] = value; image.data[offset + 2] = value; image.data[offset + 3] = 255;
+  }
+  context.putImageData(image, 0, 0);
+  return canvas.toDataURL('image/png');
+}
+
 $('#photo-done').addEventListener('click', async () => {
   if (!S.rectImg || !S.cells) return;
   updateCellsFromMask();
@@ -789,15 +869,18 @@ $('#photo-done').addEventListener('click', async () => {
     const canvas = document.createElement('canvas'); canvas.width = S.rectImg.width; canvas.height = S.rectImg.height;
     canvas.getContext('2d').putImageData(S.rectImg, 0, 0);
     const dataUrl = canvas.toDataURL('image/jpeg', .9), cells = [...S.cells];
+    const savedMask = {mask: new Uint8ClampedArray(S.mask), width: S.rectImg.width, height: S.rectImg.height};
+    const savedMaskDataUrl = maskDataUrl(savedMask.mask, savedMask.width, savedMask.height);
     const image = new Image(); image.src = dataUrl; await image.decode();
-    S.cellsFrac[faceId] = cells; S.textures[faceId] = {image, dataUrl};
+    S.cellsFrac[faceId] = cells; S.textures[faceId] = {image, dataUrl}; S.facadeMasks[faceId] = savedMask;
     let saved = true;
-    try { await saveFacade(siteId, faceId, {dataUrl, cells}); } catch { saved = false; }
+    try { await saveFacade(siteId, faceId, {dataUrl, cells, maskDataUrl: savedMaskDataUrl}); } catch { saved = false; }
     viewer.setPhotos(S.textures); drawFaceList();
     if (S.mode !== 'research') pickFace(faceId);
     else {
       $('#remove-photo').hidden = false;
-      $('#facade-status').textContent = `${photoFaceLabel()}의 창문·문 후보를 자동 판별해 저장했어요.`;
+      $('#facade-status').textContent = `${photoFaceLabel()}의 개구부 위치를 제외해 일사량 집계를 갱신했어요.`;
+      S.researchMonthly = null; void loadResearchMonthly(selectedResearchGroup());
     }
     if (S.irr) $('#go-result').textContent = '데모 진단 결과 보기';
     if (S.mode !== 'research') $('#facade-status').textContent = saved ? `${labelFace(face())}에 사진을 입혔어요. 이 기기의 브라우저에 저장했어요.`

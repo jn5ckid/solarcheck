@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {analyzeFacadeOpenings, closestFacadeByAzimuth, maskToCellFractions,
-  openingRatioFromMask, paintMask} from '../docs/facade-openings.js';
+  openingRatioFromMask, paintMask, sensorAvailabilitiesFromMask,
+  cellFractionsToMask} from '../docs/facade-openings.js';
 
 function image(width, height, color = [210, 196, 170]) {
   const data = new Uint8ClampedArray(width * height * 4);
@@ -43,6 +44,18 @@ test('pixel mask brush paints and erases before internal cell aggregation', () =
   assert.ok(cells.some(value => value < 1));
   paintMask(mask, 10, 10, 2, 2, 3, 0);
   assert.equal(openingRatioFromMask(mask), 0);
+});
+
+test('photo mask excludes only research sensor patches at the same facade position', () => {
+  const mask = new Uint8ClampedArray(16);
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 2; x++) mask[y * 4 + x] = 255;
+  const sensors = [
+    {x: -1, y: 0, z: 1, nx: 0, ny: -1}, {x: 1, y: 0, z: 1, nx: 0, ny: -1},
+    {x: -1, y: 0, z: 3, nx: 0, ny: -1}, {x: 1, y: 0, z: 3, nx: 0, ny: -1},
+  ];
+  assert.deepEqual(sensorAvailabilitiesFromMask(mask, 4, 4, sensors), [0, 1, 0, 1]);
+  const coarse = cellFractionsToMask([0, 1, 1, 0], 2, 2);
+  assert.deepEqual([...coarse.mask], [0, 255, 255, 0]);
 });
 
 test('invalid input fails clearly', () => {

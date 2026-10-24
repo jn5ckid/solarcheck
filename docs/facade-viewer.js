@@ -222,7 +222,8 @@ export class FacadeViewer {
     const site = this.site, anchor = this.research.anchor_xy || [0, 0];
     const candidates = this.research?.draftSensors ?? [];
     const drafts = this.draft ? candidates : [];
-    const pointSensors = this.points ? sensors : [];
+    const pointSensors = this.points
+      ? sensors.filter(sensor => (sensor.installable_fraction ?? 1) > .01) : [];
     const rawZ = [...all, ...candidates].map(sensor => sensor.z), zBase = Math.min(...rawZ);
     const displayLocal = sensor => researchDisplayPoint(sensor, anchor, zBase);
     const sensorPoints = [...all, ...drafts].map(displayLocal), sensorSpanZ = Math.max(...rawZ) - zBase;
@@ -264,7 +265,8 @@ export class FacadeViewer {
         const polygon = facadeCorners({p0: a, p1: b, height_m: height}).map(project);
         const surfaceId = `candidate:F${String(i + 1).padStart(2, '0')}`;
         const surfaceCandidates = target && this.heatmap
-          ? candidates.filter(sensor => sensor.surface_id === surfaceId && sensor.color) : [];
+          ? candidates.filter(sensor => sensor.surface_id === surfaceId && sensor.color
+            && (sensor.installable_fraction ?? 1) > .01) : [];
         const heatCells = facadeHeatmapCells(surfaceCandidates, a, b, height, anchor, zBase)
           .map(cell => ({...cell, points: cell.points.map(project)}));
         primitives.push({type: 'mass', points: polygon, target, roof: false, heatCells,

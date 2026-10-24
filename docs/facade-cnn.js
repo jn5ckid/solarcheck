@@ -10,10 +10,10 @@ const MODEL_SIZE = 512;
 // elements are excluded; people, cars, trees and shadows remain transient.
 const ADE20K_LABELS = new Map([
   [9, 'windowpane'], [15, 'door'], [19, 'curtain'], [37, 'lamp'],
-  [39, 'railing'], [43, 'column'], [44, 'signboard'], [54, 'stairs'],
+  [28, 'mirror'], [33, 'fence'], [39, 'railing'], [43, 'column'], [44, 'signboard'], [54, 'stairs'],
   [59, 'screen'], [60, 'stairway'], [65, 'blind'], [84, 'light'],
   [86, 'awning'], [94, 'pole'], [96, 'bannister'], [103, 'poster'],
-  [108, 'canopy'], [125, 'tank'], [132, 'screen'], [138, 'fan'],
+  [108, 'canopy'], [125, 'tank'], [132, 'screen'], [134, 'sconce'], [138, 'fan'],
   [141, 'screen'], [143, 'radiator'], [144, 'glass'],
 ]);
 
@@ -21,20 +21,6 @@ export const FACADE_BLOCKING_LABELS = new Set(ADE20K_LABELS.values());
 const FACADE_BLOCKING_IDS = new Set(ADE20K_LABELS.keys());
 const normalizeLabel = value => String(value || '').trim().toLowerCase();
 const colorKey = color => color.slice(0, 3).map(value => Number(value) || 0).join(',');
-
-export function mergeOpeningMasks(...masks) {
-  const usable = masks.filter(Boolean);
-  if (!usable.length) throw new Error('합칠 개구부 마스크가 필요해요.');
-  const length = usable[0].length;
-  if (!length || usable.some(mask => mask.length !== length)) {
-    throw new Error('개구부 마스크의 크기가 서로 달라요.');
-  }
-  const merged = new Uint8ClampedArray(length);
-  for (const mask of usable) for (let i = 0; i < length; i++) {
-    merged[i] = Math.max(merged[i], mask[i]);
-  }
-  return merged;
-}
 
 function resizeMask(source, sourceWidth, sourceHeight, targetWidth, targetHeight) {
   const mask = new Uint8ClampedArray(targetWidth * targetHeight);

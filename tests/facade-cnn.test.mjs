@@ -1,15 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {classIdsToOpeningMask, mergeOpeningMasks, segmentationToOpeningMask} from '../docs/facade-cnn.js';
-
-test('CNN misses are filled by the pixel-analysis mask without a display grid', () => {
-  const merged = mergeOpeningMasks(
-    new Uint8ClampedArray([0, 255, 0, 0]),
-    new Uint8ClampedArray([150, 0, 255, 0]),
-  );
-  assert.deepEqual([...merged], [150, 255, 255, 0]);
-  assert.throws(() => mergeOpeningMasks(new Uint8ClampedArray(2), new Uint8ClampedArray(3)), /크기/);
-});
+import {classIdsToOpeningMask, segmentationToOpeningMask} from '../docs/facade-cnn.js';
 
 test('ADE20K class IDs become a pixel mask and preserve transient objects', () => {
   const result = classIdsToOpeningMask(new Int32Array([

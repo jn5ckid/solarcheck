@@ -2,9 +2,9 @@ import { evaluate, faceName, openingRatio } from './calc.js?v=20261024-research-
 import { FacadeViewer } from './facade-viewer.js?v=20261024-spatial-mask';
 import { clampImagePoint, nearestCornerIndex, rectifiedSizeFromCorners, validateCorners } from './facade-geometry.js?v=20261024-pixel-mask';
 import { loadFacades, saveFacade, removeFacade } from './facade-store.js';
-import { analyzeFacadeOpenings, cellFractionsToMask, closestFacadeByAzimuth, maskToCellFractions,
+import { cellFractionsToMask, closestFacadeByAzimuth, maskToCellFractions,
   openingRatioFromMask, paintMask, sensorAvailabilitiesFromMask } from './facade-openings.js?v=20261024-spatial-mask';
-import { analyzeFacadeWithCNN, mergeOpeningMasks } from './facade-cnn.js?v=20261024-hybrid-mask';
+import { analyzeFacadeWithCNN } from './facade-cnn.js?v=20261024-cnn-only';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
@@ -826,25 +826,21 @@ async function analyzeRectifiedFacade() {
   $('#photo-hint').textContent = 'CNN이 창문·문·간판·설비 후보를 픽셀 단위로 분할하고 있어요…';
   drawRectifiedImage();
   try {
-    const cnn = await analyzeFacadeWithCNN(S.rectImg);
+    const proposal = await analyzeFacadeWithCNN(S.rectImg);
     if (version !== maskAnalysisVersion) return;
-    const assist = analyzeFacadeOpenings(S.rectImg, f.ns, f.nt);
-    S.mask = mergeOpeningMasks(cnn.mask, assist.mask);
-    S.cells = maskToCellFractions(S.mask, cnn.width, cnn.height, f.ns, f.nt);
-    const labels = cnn.labels.length ? cnn.labels.join(', ') : 'CNN 클래스 없음';
-    const ratio = openingRatioFromMask(S.mask);
-    $('#mask-method').textContent = `${cnn.model} + 색상·명도·경계 보조 · 감지: ${labels}`;
-    $('#photo-hint').textContent = ratio > 0
-      ? 'AI와 보조 픽셀 분석을 합친 마스크를 표시했어요. 잘못 판별한 부분은 붓으로 개구부를 더 칠하거나 벽면을 복원해 주세요.'
-      : '자동 분석이 설치 불가 요소를 찾지 못했어요. 개구부 칠하기 붓으로 직접 마스킹해 주세요.';
+    S.mask = proposal.mask;
+    S.cells = maskToCellFractions(S.mask, proposal.width, proposal.height, f.ns, f.nt);
+    const labels = proposal.labels.length ? proposal.labels.join(', ') : '해당 클래스 없음';
+    $('#mask-method').textContent = `${proposal.model} · 감지 클래스: ${labels}`;
+    $('#photo-hint').textContent = proposal.openingRatio > 0
+      ? 'CNN 분할 마스크를 표시했어요. 잘못 판별한 부분만 붓으로 보정해 주세요.'
+      : 'CNN이 설치 불가 요소를 검출하지 못했어요. 자동 색상·경계 판별은 사용하지 않습니다.';
   } catch (error) {
     if (version !== maskAnalysisVersion) return;
-    const proposal = analyzeFacadeOpenings(S.rectImg, f.ns, f.nt);
-    S.mask = proposal.mask; S.cells = proposal.cells;
-    $('#mask-method').textContent = `CNN을 사용할 수 없어 기존 색상·명도·경계 기반 분석으로 대체했어요. ${error.message}`;
-    $('#photo-hint').textContent = proposal.openingRatio > 0
-      ? '대체 분석 결과를 표시했어요. 붓으로 개구부를 더 칠하거나 벽면을 복원해 주세요.'
-      : '뚜렷한 개구부 후보를 찾지 못했어요. 개구부 칠하기 붓으로 직접 마스킹할 수 있어요.';
+    S.mask = new Uint8ClampedArray(S.rectImg.width * S.rectImg.height);
+    S.cells = maskToCellFractions(S.mask, S.rectImg.width, S.rectImg.height, f.ns, f.nt);
+    $('#mask-method').textContent = `CNN 실행 실패 · 자동 마스크를 만들지 않았어요. ${error.message}`;
+    $('#photo-hint').textContent = '색상·경계 기반 대체 판별은 사용하지 않습니다. 다시 실행하거나 붓으로 직접 마스킹해 주세요.';
   } finally {
     if (version === maskAnalysisVersion) {
       $('#mask-auto').disabled = false;

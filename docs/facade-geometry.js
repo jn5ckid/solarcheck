@@ -64,3 +64,18 @@ export function rectifiedSize(widthM, heightM, ppm = 20, maxWidth = 720, maxHeig
   const scale = Math.min(1, maxWidth / rawWidth, maxHeight / rawHeight);
   return [Math.max(1, Math.round(rawWidth * scale)), Math.max(1, Math.round(rawHeight * scale))];
 }
+
+export function rectifiedSizeFromCorners(points, maxWidth = 720, maxHeight = 960) {
+  if (!validateCorners(points) || !(maxWidth > 0) || !(maxHeight > 0)) {
+    throw new Error('원근 보정할 입면 모서리가 올바르지 않아요.');
+  }
+  const length = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const width = (length(points[0], points[1]) + length(points[3], points[2])) / 2;
+  const height = (length(points[0], points[3]) + length(points[1], points[2])) / 2;
+  const ratio = Math.min(5, Math.max(.2, width / Math.max(height, 1)));
+  let outputWidth = maxWidth, outputHeight = Math.round(outputWidth / ratio);
+  if (outputHeight > maxHeight) {
+    outputHeight = maxHeight; outputWidth = Math.round(outputHeight * ratio);
+  }
+  return [Math.max(1, outputWidth), Math.max(1, outputHeight)];
+}

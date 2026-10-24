@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {analyzeFacadeOpenings, closestFacadeByAzimuth} from '../docs/facade-openings.js';
+import {analyzeFacadeOpenings, closestFacadeByAzimuth, maskToCellFractions,
+  openingRatioFromMask, paintMask} from '../docs/facade-openings.js';
 
 function image(width, height, color = [210, 196, 170]) {
   const data = new Uint8ClampedArray(width * height * 4);
@@ -21,6 +22,7 @@ test('uniform facade remains fully usable', () => {
   const result = analyzeFacadeOpenings(image(80, 80), 4, 4);
   assert.deepEqual(result.cells, Array(16).fill(1));
   assert.equal(result.openingRatio, 0);
+  assert.equal(result.mask.some(value => value > 0), false);
 });
 
 test('dark contrasting rectangles become editable opening candidates', () => {
@@ -29,8 +31,18 @@ test('dark contrasting rectangles become editable opening candidates', () => {
   fillRect(facade, 60, 60, 30, 60, [45, 50, 55]);
   const result = analyzeFacadeOpenings(facade, 4, 4);
   assert.ok(result.cells.some(value => value < 1));
-  assert.ok(result.windowCount + result.doorCount + result.uncertainCount > 0);
+  assert.ok(result.maskedPixelCount + result.uncertainPixelCount > 0);
   assert.ok(result.openingRatio > 0);
+});
+
+test('pixel mask brush paints and erases before internal cell aggregation', () => {
+  const mask = new Uint8ClampedArray(100);
+  paintMask(mask, 10, 10, 2, 2, 2, 255);
+  assert.ok(openingRatioFromMask(mask) > 0);
+  const cells = maskToCellFractions(mask, 10, 10, 2, 2);
+  assert.ok(cells.some(value => value < 1));
+  paintMask(mask, 10, 10, 2, 2, 3, 0);
+  assert.equal(openingRatioFromMask(mask), 0);
 });
 
 test('invalid input fails clearly', () => {

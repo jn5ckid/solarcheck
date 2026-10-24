@@ -1,19 +1,20 @@
 import { evaluate, faceName, openingRatio } from './calc.js?v=20261024-research-cleanup';
 import { FacadeViewer } from './facade-viewer.js?v=20261024-research-cleanup';
-import { clampImagePoint, nearestCornerIndex, rectifiedSize, validateCorners } from './facade-geometry.js?v=20261024-perspective-mask';
+import { clampImagePoint, nearestCornerIndex, rectifiedSizeFromCorners, validateCorners } from './facade-geometry.js?v=20261024-pixel-mask';
 import { loadFacades, saveFacade, removeFacade } from './facade-store.js';
-import { analyzeFacadeOpenings, closestFacadeByAzimuth } from './facade-openings.js?v=20261024-auto-openings';
+import { analyzeFacadeOpenings, closestFacadeByAzimuth, maskToCellFractions,
+  openingRatioFromMask, paintMask } from './facade-openings.js?v=20261024-pixel-mask';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
 const fmt = (x, d = 0) => Number.isFinite(x) ? x.toLocaleString('ko-KR', { maximumFractionDigits: d, minimumFractionDigits: d }) : '–';
 const mean = a => a.reduce((s, x) => s + x, 0) / a.length;
-const PPM = 20;          // 보정 영상 해상도 (px/m), 화면 폭에 맞춰 줄인다
 const MAX_SRC = 1600;    // 사진 긴 변 최대 px
 
 const S = { params: null, site: null, irr: null, face: null, cellsFrac: {}, img: null, corners: [], cells: null,
   textures: {}, mode: 'site', publicSite: null, researchOverview: null, researchBuilding: null, researchSensors: [], researchGroup: null,
-  researchMonthly: null, researchAddress: null, analysisGrid: null, candidatePrediction: null, dragCorner: null };
+  researchMonthly: null, researchAddress: null, analysisGrid: null, candidatePrediction: null, dragCorner: null,
+  mask: null, maskMode: 'opening', maskPointer: null, brushRadius: 28 };
 const viewer = new FacadeViewer($('#building-canvas'), id => pickFace(id), sensor => showResearchSensor(sensor));
 let siteLoadVersion = 0;
 
@@ -514,10 +515,10 @@ function openPhoto() {
   const f = face();
   $('#photo-title').textContent = `${photoFaceLabel()} 사진`;
   $('#photo-hint').textContent = `건물 밖에서 ${photoFaceLabel()}을 정면으로 보고, 벽 전체가 들어오게 찍어 주세요.`;
-  S.img = null; S.rectImg = null; S.corners = []; S.dragCorner = null;
+  S.img = null; S.rectImg = null; S.corners = []; S.dragCorner = null; S.mask = null; S.maskPointer = null;
   S.cells = S.cellsFrac[S.face] ? [...S.cellsFrac[S.face]] : null;
   $('#corner-box').hidden = true;
-  $('#grid-box').hidden = true;
+  $('#mask-box').hidden = true;
   $('#photo-reset').hidden = true;
   $('#photo-done').disabled = true;
   $('#photo-input').value = '';
@@ -529,11 +530,11 @@ async function loadPhoto(e) {
   const file = e.target.files[0];
   if (!file) return;
   e.target.value = '';
-  S.rectImg = null;
+  S.rectImg = null; S.mask = null; S.maskPointer = null;
   $('#photo-done').disabled = true;
   $('#photo-reset').hidden = true;
   $('#corner-box').hidden = true;
-  $('#grid-box').hidden = true;
+  $('#mask-box').hidden = true;
   if (file.size > 20 * 1024 * 1024) { $('#photo-hint').textContent = '20MB 이하의 사진을 선택해 주세요.'; return; }
   let bmp;
   try { bmp = await createImageBitmap(file); }
@@ -544,8 +545,8 @@ async function loadPhoto(e) {
   c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
   bmp.close();
   S.img = c; S.corners = []; S.dragCorner = null;
-  S.cells = null;
-  $('#grid-box').hidden = true;
+  S.cells = null; S.mask = null;
+  $('#mask-box').hidden = true;
   $('#corner-box').hidden = false;
   $('#photo-done').disabled = true;
   drawCorners();
@@ -628,7 +629,7 @@ function finishCornerDrag(canvas, cancelled = false) {
     $('#corner-hint').textContent = '네 점이 교차하지 않도록 벽 모서리 안에서 조정해 주세요.';
     return;
   }
-  S.cells = null;
+  S.cells = null; S.mask = null;
   drawCorners(); rectify();
 }
 
@@ -640,8 +641,8 @@ $('#photo-canvas').addEventListener('pointercancel', e => {
 });
 
 $('#photo-reset').addEventListener('click', () => {
-  S.corners = []; S.cells = null; S.dragCorner = null;
-  $('#grid-box').hidden = true; $('#photo-reset').hidden = true; $('#photo-done').disabled = true;
+  S.corners = []; S.cells = null; S.dragCorner = null; S.mask = null; S.maskPointer = null;
+  $('#mask-box').hidden = true; $('#photo-reset').hidden = true; $('#photo-done').disabled = true;
   drawCorners();
 });
 
@@ -672,7 +673,7 @@ function rectify() {
     $('#corner-hint').textContent = '왼쪽 위 → 오른쪽 위 → 오른쪽 아래 → 왼쪽 아래 순서로 모서리를 다시 지정해 주세요.';
     return;
   }
-  const [W, H] = rectifiedSize(f.width_m, f.height_m, PPM);
+  const [W, H] = rectifiedSizeFromCorners(S.corners);
   let h;
   try { h = homography([[0, 0], [W, 0], [W, H], [0, H]], S.corners); }
   catch (err) { $('#corner-hint').textContent = err.message; return; }
@@ -688,50 +689,99 @@ function rectify() {
     out.data[o] = src.data[i]; out.data[o + 1] = src.data[i + 1]; out.data[o + 2] = src.data[i + 2]; out.data[o + 3] = 255;
   }
   S.rectImg = out;
-  $('#rectify-hint').textContent = `실제 입면 ${fmt(f.width_m, 1)} × ${fmt(f.height_m, 1)}m 비율로 ${W} × ${H}px 직사각형에 보정했어요.`;
-  if (!S.cells) {
+  $('#rectify-hint').textContent = `선택한 벽 경계의 가로·세로 비율을 유지해 ${W} × ${H}px 직사각형으로 보정했어요. 면적 계산에는 입면 치수 ${fmt(f.width_m, 1)} × ${fmt(f.height_m, 1)}m를 사용합니다.`;
+  if (!S.mask) {
     const proposal = analyzeFacadeOpenings(out, f.ns, f.nt);
-    S.cells = proposal.cells;
-    const candidates = proposal.windowCount + proposal.doorCount;
-    $('#photo-hint').textContent = candidates || proposal.uncertainCount
-      ? `자동 판별 완료: 창문·문 후보 ${candidates}칸, 확인 필요 ${proposal.uncertainCount}칸. 격자를 눌러 수정해 주세요.`
-      : '자동 판별에서 뚜렷한 창문·문 후보를 찾지 못했어요. 격자를 눌러 직접 제외할 수 있어요.';
+    S.mask = proposal.mask; S.cells = proposal.cells;
+    $('#photo-hint').textContent = proposal.openingRatio > 0
+      ? '창문·문 후보를 픽셀 마스크로 표시했어요. 붓으로 개구부를 더 칠하거나 벽면을 복원해 주세요.'
+      : '뚜렷한 창문·문 후보를 찾지 못했어요. 개구부 칠하기 붓으로 직접 마스킹할 수 있어요.';
   }
-  $('#grid-box').hidden = false;
+  $('#mask-box').hidden = false;
   $('#photo-done').disabled = false;
-  drawGrid();
+  drawMask();
 }
 
-function drawGrid() {
-  const f = face(), cv = $('#rect-canvas'), g = cv.getContext('2d');
-  const cw = cv.width / f.ns, ch = cv.height / f.nt;
-  const minH = S.params.min_annual_kwh_m2.value, annual = S.irr?.faces[f.face_id]?.annual;
-  g.putImageData(S.rectImg, 0, 0);
-  for (let t = 0; t < f.nt; t++) for (let s = 0; s < f.ns; s++) {
-    const i = t * f.ns + s, x = s * cw, y = (f.nt - 1 - t) * ch, v = S.cells[i];
-    if (annual && annual[i] < minH) {
-      g.fillStyle = 'rgba(141,156,151,.6)'; g.fillRect(x, y, cw, ch);
-      g.strokeStyle = 'rgba(255,255,255,.7)'; g.lineWidth = 1;
-      g.beginPath(); g.moveTo(x, y + ch); g.lineTo(x + cw, y); g.stroke();
-    }
-    if (v > 0) { g.fillStyle = 'rgba(242,179,0,.45)'; g.fillRect(x, y, cw * v, ch); }
-    if (v < 1) { g.fillStyle = 'rgba(24,48,42,.6)'; g.fillRect(x + cw * v, y, cw * (1 - v), ch); }
-    g.strokeStyle = 'rgba(255,255,255,.85)'; g.lineWidth = 1; g.strokeRect(x + .5, y + .5, cw - 1, ch - 1);
+function updateCellsFromMask() {
+  const f = face(), cv = $('#rect-canvas');
+  S.cells = maskToCellFractions(S.mask, cv.width, cv.height, f.ns, f.nt);
+}
+
+function drawMask(pointer = null) {
+  const cv = $('#rect-canvas'), g = cv.getContext('2d');
+  const preview = g.createImageData(cv.width, cv.height);
+  preview.data.set(S.rectImg.data);
+  for (let i = 0; i < S.mask.length; i++) {
+    const alpha = S.mask[i] / 255 * .58;
+    if (!alpha) continue;
+    const offset = i * 4;
+    preview.data[offset] = Math.round(preview.data[offset] * (1 - alpha) + 11 * alpha);
+    preview.data[offset + 1] = Math.round(preview.data[offset + 1] * (1 - alpha) + 110 * alpha);
+    preview.data[offset + 2] = Math.round(preview.data[offset + 2] * (1 - alpha) + 92 * alpha);
   }
-  $('#open-ratio').textContent = `자동 판별·보정된 창문·문 비율 ${Math.round((1 - mean(S.cells)) * 100)}% · 칸 하나 ${fmt(f.width_m / f.ns, 1)} × ${fmt(f.height_m / f.nt, 1)}m`;
+  g.putImageData(preview, 0, 0);
+  if (pointer) {
+    g.save(); g.beginPath(); g.arc(pointer[0], pointer[1], S.brushRadius, 0, Math.PI * 2);
+    g.strokeStyle = S.maskMode === 'opening' ? '#f2b300' : '#fff'; g.lineWidth = Math.max(2, cv.width / 360);
+    g.stroke(); g.restore();
+  }
+  $('#open-ratio').textContent = `마스킹된 창문·문 면적 비율 ${Math.round(openingRatioFromMask(S.mask) * 100)}% · 격자 없이 픽셀 단위로 판별·수정합니다.`;
 }
 
-$('#rect-canvas').addEventListener('click', e => {
-  const f = face(), cv = e.currentTarget, rc = cv.getBoundingClientRect();
-  const s = Math.floor((e.clientX - rc.left) / rc.width * f.ns);
-  const t = f.nt - 1 - Math.floor((e.clientY - rc.top) / rc.height * f.nt);
-  const i = t * f.ns + s;
-  S.cells[i] = S.cells[i] === 1 ? 0 : S.cells[i] === 0 ? 0.5 : 1;
-  drawGrid();
+function setMaskMode(mode) {
+  S.maskMode = mode;
+  $('#mask-opening').setAttribute('aria-pressed', String(mode === 'opening'));
+  $('#mask-wall').setAttribute('aria-pressed', String(mode === 'wall'));
+}
+$('#mask-opening').addEventListener('click', () => setMaskMode('opening'));
+$('#mask-wall').addEventListener('click', () => setMaskMode('wall'));
+$('#mask-brush-size').addEventListener('input', e => { S.brushRadius = Number(e.target.value); });
+$('#mask-auto').addEventListener('click', () => {
+  if (!S.rectImg) return;
+  const f = face(), proposal = analyzeFacadeOpenings(S.rectImg, f.ns, f.nt);
+  S.mask = proposal.mask; S.cells = proposal.cells; drawMask();
+  $('#photo-hint').textContent = '사진을 다시 판별해 개구부 마스크를 초기화했어요.';
 });
+
+const maskCanvasPoint = (canvas, event) => {
+  const rect = canvas.getBoundingClientRect();
+  return [
+    Math.max(0, Math.min(canvas.width - 1, (event.clientX - rect.left) * canvas.width / rect.width)),
+    Math.max(0, Math.min(canvas.height - 1, (event.clientY - rect.top) * canvas.height / rect.height)),
+  ];
+};
+function paintMaskSegment(from, to) {
+  const cv = $('#rect-canvas'), distance = Math.hypot(to[0] - from[0], to[1] - from[1]);
+  const steps = Math.max(1, Math.ceil(distance / Math.max(2, S.brushRadius / 3)));
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    paintMask(S.mask, cv.width, cv.height, from[0] + (to[0] - from[0]) * t,
+      from[1] + (to[1] - from[1]) * t, S.brushRadius, S.maskMode === 'opening' ? 255 : 0);
+  }
+}
+$('#rect-canvas').addEventListener('pointerdown', e => {
+  if (!S.mask) return;
+  e.preventDefault();
+  const cv = e.currentTarget, point = maskCanvasPoint(cv, e);
+  S.maskPointer = {pointerId: e.pointerId, last: point}; cv.setPointerCapture?.(e.pointerId);
+  paintMaskSegment(point, point); drawMask(point);
+});
+$('#rect-canvas').addEventListener('pointermove', e => {
+  if (!S.maskPointer || S.maskPointer.pointerId !== e.pointerId) return;
+  const cv = e.currentTarget, point = maskCanvasPoint(cv, e);
+  e.preventDefault(); paintMaskSegment(S.maskPointer.last, point); S.maskPointer.last = point; drawMask(point);
+});
+function finishMaskStroke(canvas, event) {
+  if (!S.maskPointer || S.maskPointer.pointerId !== event.pointerId) return;
+  canvas.releasePointerCapture?.(event.pointerId); S.maskPointer = null; updateCellsFromMask(); drawMask();
+}
+$('#rect-canvas').addEventListener('pointerup', e => finishMaskStroke(e.currentTarget, e));
+$('#rect-canvas').addEventListener('pointercancel', e => finishMaskStroke(e.currentTarget, e));
+$('#rect-canvas').addEventListener('pointerleave', () => { if (!S.maskPointer && S.mask) drawMask(); });
 
 $('#photo-done').addEventListener('click', async () => {
   if (!S.rectImg || !S.cells) return;
+  updateCellsFromMask();
   const button = $('#photo-done'), siteId = photoSite().site_id, faceId = S.face;
   button.disabled = true;
   try {

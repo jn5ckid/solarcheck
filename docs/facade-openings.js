@@ -13,43 +13,45 @@ const lumaAt = (data, width, x, y) => {
   return data[offset] * .2126 + data[offset + 1] * .7152 + data[offset + 2] * .0722;
 };
 
-function cellFeatures(image, ns, nt) {
-  const {width, height, data} = image;
-  const features = [];
+export function openingRatioFromMask(mask) {
+  if (!mask?.length) return 0;
+  return mask.reduce((sum, value) => sum + value / 255, 0) / mask.length;
+}
+
+export function maskToCellFractions(mask, width, height, ns, nt) {
+  if (!mask || mask.length !== width * height || !Number.isInteger(ns) || ns < 1 || !Number.isInteger(nt) || nt < 1) {
+    throw new Error('개구부 마스크와 입면 격자를 확인해 주세요.');
+  }
+  const cells = [];
   for (let t = 0; t < nt; t++) {
-    const y0 = Math.floor((nt - 1 - t) * height / nt);
-    const y1 = Math.max(y0 + 1, Math.floor((nt - t) * height / nt));
+    const y0 = Math.floor((nt - 1 - t) * height / nt), y1 = Math.max(y0 + 1, Math.floor((nt - t) * height / nt));
     for (let s = 0; s < ns; s++) {
-      const x0 = Math.floor(s * width / ns);
-      const x1 = Math.max(x0 + 1, Math.floor((s + 1) * width / ns));
-      const step = Math.max(1, Math.floor(Math.min(x1 - x0, y1 - y0) / 14));
-      let red = 0, green = 0, blue = 0, edge = 0, count = 0;
-      for (let y = y0; y < y1; y += step) for (let x = x0; x < x1; x += step) {
-        const offset = (y * width + x) * 4;
-        red += data[offset]; green += data[offset + 1]; blue += data[offset + 2];
-        const here = lumaAt(data, width, x, y);
-        if (x + step < x1) edge += Math.abs(here - lumaAt(data, width, x + step, y));
-        if (y + step < y1) edge += Math.abs(here - lumaAt(data, width, x, y + step));
-        count++;
+      const x0 = Math.floor(s * width / ns), x1 = Math.max(x0 + 1, Math.floor((s + 1) * width / ns));
+      let masked = 0, count = 0;
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+        masked += mask[y * width + x] / 255; count++;
       }
-      const r = red / count, g = green / count, b = blue / count;
-      features.push({
-        s, t, r, g, b,
-        luma: r * .2126 + g * .7152 + b * .0722,
-        edge: edge / Math.max(1, count),
-      });
+      cells.push(Math.max(0, Math.min(1, 1 - masked / count)));
     }
   }
-  return features;
+  return cells;
+}
+
+export function paintMask(mask, width, height, cx, cy, radius, value) {
+  if (!mask || mask.length !== width * height || !(radius > 0)) return;
+  const x0 = Math.max(0, Math.floor(cx - radius)), x1 = Math.min(width - 1, Math.ceil(cx + radius));
+  const y0 = Math.max(0, Math.floor(cy - radius)), y1 = Math.min(height - 1, Math.ceil(cy + radius));
+  const squared = radius * radius, next = Math.max(0, Math.min(255, value));
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    if ((x - cx) ** 2 + (y - cy) ** 2 <= squared) mask[y * width + x] = next;
+  }
 }
 
 /**
  * Lightweight facade-opening proposal generator.
  *
- * It deliberately returns editable grid fractions rather than asserting a
- * pixel-perfect semantic segmentation. Dark/contrasting, edge-rich regions
- * become window/door candidates; uncertain cells remain at 50% so the user
- * can confirm them in the existing grid editor.
+ * It returns an editable pixel mask. Dark/contrasting, edge-rich regions
+ * become window/door candidates and are later aggregated only for area math.
  */
 export function analyzeFacadeOpenings(image, ns, nt) {
   if (!image || !(image.width > 0) || !(image.height > 0) || !image.data) {
@@ -59,57 +61,64 @@ export function analyzeFacadeOpenings(image, ns, nt) {
     throw new Error('입면 격자 크기가 올바르지 않아요.');
   }
 
-  const features = cellFeatures(image, ns, nt);
+  const {width, height, data} = image;
+  const sampleStep = Math.max(1, Math.floor(Math.sqrt(width * height / 12000)));
+  const samples = [];
+  for (let y = 0; y < height; y += sampleStep) for (let x = 0; x < width; x += sampleStep) {
+    const offset = (y * width + x) * 4;
+    const r = data[offset], g = data[offset + 1], b = data[offset + 2];
+    const here = lumaAt(data, width, x, y);
+    const right = x + sampleStep < width ? lumaAt(data, width, x + sampleStep, y) : here;
+    const below = y + sampleStep < height ? lumaAt(data, width, x, y + sampleStep) : here;
+    samples.push({r, g, b, luma: here, edge: (Math.abs(here - right) + Math.abs(here - below)) / 2});
+  }
   const centers = {
-    r: median(features.map(cell => cell.r)),
-    g: median(features.map(cell => cell.g)),
-    b: median(features.map(cell => cell.b)),
-    luma: median(features.map(cell => cell.luma)),
-    edge: median(features.map(cell => cell.edge)),
+    r: median(samples.map(pixel => pixel.r)),
+    g: median(samples.map(pixel => pixel.g)),
+    b: median(samples.map(pixel => pixel.b)),
+    luma: median(samples.map(pixel => pixel.luma)),
+    edge: median(samples.map(pixel => pixel.edge)),
   };
-  const colorDistances = features.map(cell => Math.hypot(
-    cell.r - centers.r, cell.g - centers.g, cell.b - centers.b,
+  const colorDistances = samples.map(pixel => Math.hypot(
+    pixel.r - centers.r, pixel.g - centers.g, pixel.b - centers.b,
   ));
   const scales = {
     color: robustScale(colorDistances, median(colorDistances), 18),
-    luma: robustScale(features.map(cell => cell.luma), centers.luma, 14),
-    edge: robustScale(features.map(cell => cell.edge), centers.edge, 5),
+    luma: robustScale(samples.map(pixel => pixel.luma), centers.luma, 14),
+    edge: robustScale(samples.map(pixel => pixel.edge), centers.edge, 5),
   };
-
-  const scored = features.map((cell, index) => {
-    const contrast = colorDistances[index] / scales.color;
-    const darkness = Math.max(0, (centers.luma - cell.luma) / scales.luma);
-    const edge = Math.max(0, (cell.edge - centers.edge) / scales.edge);
-    return {...cell, score: contrast * .7 + darkness * .75 + edge * .45};
-  });
-  const at = (s, t) => scored[t * ns + s];
-  const neighborSupport = cell => {
-    let support = 0;
-    for (let dt = -1; dt <= 1; dt++) for (let ds = -1; ds <= 1; ds++) {
-      if (!ds && !dt) continue;
-      const other = at(cell.s + ds, cell.t + dt);
-      if (other?.score >= 1.05) support++;
+  const raw = new Uint8ClampedArray(width * height);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const offset = (y * width + x) * 4;
+    const r = data[offset], g = data[offset + 1], b = data[offset + 2], luma = lumaAt(data, width, x, y);
+    const contrast = Math.hypot(r - centers.r, g - centers.g, b - centers.b) / scales.color;
+    const darkness = Math.max(0, (centers.luma - luma) / scales.luma);
+    const right = x + 1 < width ? lumaAt(data, width, x + 1, y) : luma;
+    const below = y + 1 < height ? lumaAt(data, width, x, y + 1) : luma;
+    const edge = Math.max(0, ((Math.abs(luma - right) + Math.abs(luma - below)) / 2 - centers.edge) / scales.edge);
+    const score = contrast * .68 + darkness * .72 + edge * .22;
+    raw[y * width + x] = score >= 1.55 ? 255 : score >= 1.02 ? 150 : 0;
+  }
+  const mask = new Uint8ClampedArray(raw.length);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    let active = 0, strong = 0, count = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const xx = x + dx, yy = y + dy;
+      if (xx < 0 || yy < 0 || xx >= width || yy >= height) continue;
+      const value = raw[yy * width + xx];
+      if (value > 0) active++;
+      if (value === 255) strong++;
+      count++;
     }
-    return support;
-  };
-
-  const labels = scored.map(cell => {
-    const supported = neighborSupport(cell) > 0;
-    if (cell.score >= 1.75 || (cell.score >= 1.2 && supported)) {
-      return cell.t < Math.max(1, Math.ceil(nt * .3)) ? 'door' : 'window';
-    }
-    if (cell.score >= .82) return 'uncertain';
-    return 'wall';
-  });
-  const cells = labels.map(label => label === 'wall' ? 1 : label === 'uncertain' ? .5 : 0);
-  const openingEquivalent = cells.reduce((sum, value) => sum + 1 - value, 0);
+    mask[y * width + x] = strong >= 3 || active >= Math.ceil(count * .7) ? 255
+      : active >= Math.ceil(count * .45) ? 150 : 0;
+  }
+  const cells = maskToCellFractions(mask, width, height, ns, nt);
+  const openingRatio = openingRatioFromMask(mask);
   return {
-    cells,
-    labels,
-    openingRatio: openingEquivalent / cells.length,
-    windowCount: labels.filter(label => label === 'window').length,
-    doorCount: labels.filter(label => label === 'door').length,
-    uncertainCount: labels.filter(label => label === 'uncertain').length,
+    cells, mask, width, height, openingRatio,
+    maskedPixelCount: mask.filter(value => value >= 200).length,
+    uncertainPixelCount: mask.filter(value => value > 0 && value < 200).length,
   };
 }
 

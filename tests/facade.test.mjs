@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { clampImagePoint, nearestCornerIndex, pointInPolygon, projectPoint, facadeCorners,
-  imageTransform, rectifiedSize, validateCorners } from '../docs/facade-geometry.js';
+  imageTransform, rectifiedSize, rectifiedSizeFromCorners, validateCorners } from '../docs/facade-geometry.js';
 import { FacadeViewer, researchDisplayPoint, researchPointRadii, facadeHeatmapCells } from '../docs/facade-viewer.js';
 
 test('research sensor display offset follows its normal without changing source XYZ', () => {
@@ -68,6 +68,15 @@ test('corner dragging selects the nearest handle and stays inside the image', ()
 test('rectified preview keeps the measured facade aspect ratio', () => {
   const [width, height] = rectifiedSize(12, 18, 20, 720, 960);
   assert.ok(Math.abs(width / height - 12 / 18) < .01);
+  assert.ok(width <= 720 && height <= 960);
+});
+
+test('photo rectification follows the selected trapezoid instead of model dimensions', () => {
+  const corners = [[20, 20], [220, 35], [190, 330], [40, 310]];
+  const [width, height] = rectifiedSizeFromCorners(corners, 720, 960);
+  const top = Math.hypot(200, 15), bottom = Math.hypot(150, 20);
+  const left = Math.hypot(20, 290), right = Math.hypot(30, 295);
+  assert.ok(Math.abs(width / height - ((top + bottom) / (left + right))) < .01);
   assert.ok(width <= 720 && height <= 960);
 });
 

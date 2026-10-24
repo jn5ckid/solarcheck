@@ -6,7 +6,7 @@
 <title>솔라체크 · 외피 태양광 사전진단</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <link rel="stylesheet" href="style.css?v=20261024-monthly-facade">
-<script type="module" src="app.js?v=20261024-research-cleanup"></script>
+<script type="module" src="app.js?v=20261024-auto-openings"></script>
 </head>
 <body>
 <header class="top">
@@ -100,11 +100,11 @@
       <canvas id="photo-canvas" aria-label="입면 사진. 네 모서리를 차례로 누르세요"></canvas>
     </div>
     <div id="grid-box" hidden>
-      <p class="hint">창이나 간판이 있는 칸을 누르면 설치 제외로 바뀌어요. 한 번 더 누르면 절반, 다시 누르면 벽으로 돌아와요.</p>
+      <p class="hint">사진을 보정하면 창문·문 후보를 자동으로 표시해요. 결과가 다르면 칸을 눌러 제외 → 절반 → 벽면 순서로 수정하세요.</p>
       <canvas id="rect-canvas" aria-label="정면으로 보정한 입면과 설치 격자"></canvas>
       <ul class="legend">
         <li><i class="k-wall"></i>벽면으로 선택</li><li><i class="k-half"></i>절반</li>
-        <li><i class="k-open"></i>창·간판</li><li><i class="k-shade"></i>일사 기준 제외 (분석 후)</li>
+        <li><i class="k-open"></i>창문·문 후보</li><li><i class="k-shade"></i>일사 기준 제외 (분석 후)</li>
       </ul>
       <p id="open-ratio" class="hint"></p>
     </div>

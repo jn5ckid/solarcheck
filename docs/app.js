@@ -2,6 +2,7 @@ import { evaluate, faceName, openingRatio } from './calc.js?v=20261024-research-
 import { FacadeViewer } from './facade-viewer.js?v=20261024-research-cleanup';
 import { validateCorners } from './facade-geometry.js';
 import { loadFacades, saveFacade, removeFacade } from './facade-store.js';
+import { analyzeFacadeOpenings, closestFacadeByAzimuth } from './facade-openings.js?v=20261024-auto-openings';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
@@ -17,6 +18,14 @@ const viewer = new FacadeViewer($('#building-canvas'), id => pickFace(id), senso
 let siteLoadVersion = 0;
 
 const labelFace = f => `${faceName(f)}${S.site?.source === 'public_api' ? ` · ${f.face_id}` : ''}`;
+const photoSite = () => S.mode === 'research' ? S.publicSite : S.site;
+const face = () => photoSite()?.faces.find(f => f.face_id === S.face);
+const selectedResearchGroup = () => S.researchBuilding?.surface_groups
+  .find(group => group.surface_group_id === S.researchGroup) || null;
+const photoFaceLabel = () => S.mode === 'research' && selectedResearchGroup()
+  ? researchSurfaceLabel(selectedResearchGroup()) : labelFace(face());
+const researchPhotoFace = group => group?.surface_type === 'Roof' ? null
+  : closestFacadeByAzimuth(S.publicSite?.faces, group?.normal_azimuth_bin_deg);
 
 // ---------- 공통 ----------
 async function getJSON(url) {
@@ -64,6 +73,28 @@ function buildingInfo(site) {
     <dt>주변 건물</dt><dd>${site.context.length}동 반영</dd>`;
 }
 
+async function restoreFacadePhotos(site) {
+  let stored = [], storageAvailable = true;
+  try { stored = await loadFacades(site.site_id); }
+  catch { storageAvailable = false; }
+  const restored = await Promise.all(stored.map(async record => {
+    const facade = site.faces.find(item => item.face_id === record.faceId && item.type === 'facade');
+    if (!facade || !Array.isArray(record.cells) || record.cells.length !== facade.ns * facade.nt
+      || record.cells.some(x => !Number.isFinite(x) || x < 0 || x > 1)
+      || !/^data:image\/(jpeg|png);base64,/.test(record.dataUrl)) return null;
+    try {
+      const image = new Image(); image.src = record.dataUrl; await image.decode();
+      return {record, image};
+    } catch { return null; }
+  }));
+  for (const entry of restored.filter(Boolean)) {
+    S.textures[entry.record.faceId] = {image: entry.image, dataUrl: entry.record.dataUrl};
+    S.cellsFrac[entry.record.faceId] = entry.record.cells;
+  }
+  viewer.setPhotos(S.textures);
+  return {storageAvailable, count: Object.keys(S.textures).length};
+}
+
 // ---------- 1. 건물 ----------
 async function displaySite(site, irr, version = ++siteLoadVersion) {
   ++researchVersion; ++researchMonthlyVersion;
@@ -81,6 +112,7 @@ async function displaySite(site, irr, version = ++siteLoadVersion) {
   $('#face-list-title').textContent = '사진을 촬영·적용할 입면을 고르세요';
   $('#model-context').disabled = false;
   $('#go-photo').textContent = '선택한 입면 사진 촬영·선택';
+  $('#go-photo').hidden = false; $('#go-result').hidden = false; $('#check-surrogate').hidden = false;
   $('#building-actions').hidden = false;
   $('#building-result').hidden = false;
   $('#loaded-building-name').textContent = `${site.name} · ${site.address}`;
@@ -95,27 +127,9 @@ async function displaySite(site, irr, version = ++siteLoadVersion) {
   $('#model-front').disabled = true;
   $('#remove-photo').hidden = true;
   $('#facade-status').textContent = '저장된 입면 사진을 확인하고 있어요.';
-  let stored = [];
-  let storageAvailable = true;
-  try { stored = await loadFacades(id); }
-  catch { storageAvailable = false; }
-  const restored = await Promise.all(stored.map(async record => {
-    const f = site.faces.find(f => f.face_id === record.faceId && f.type === 'facade');
-    if (!f || !Array.isArray(record.cells) || record.cells.length !== f.ns * f.nt
-      || record.cells.some(x => !Number.isFinite(x) || x < 0 || x > 1)
-      || !/^data:image\/(jpeg|png);base64,/.test(record.dataUrl)) return null;
-    try {
-      const image = new Image(); image.src = record.dataUrl; await image.decode();
-      return {record, image};
-    } catch { return null; }
-  }));
+  const {storageAvailable, count} = await restoreFacadePhotos(site);
   if (version !== siteLoadVersion) return;
-  for (const entry of restored.filter(Boolean)) {
-    S.textures[entry.record.faceId] = {image: entry.image, dataUrl: entry.record.dataUrl};
-    S.cellsFrac[entry.record.faceId] = entry.record.cells;
-  }
-  viewer.setPhotos(S.textures); drawFaceList();
-  const count = Object.keys(S.textures).length;
+  drawFaceList();
   $('#facade-status').textContent = !storageAvailable ? '사진 저장소를 사용할 수 없어 현재 화면에만 사진을 입힐 수 있어요.'
     : count ? `이 건물의 입면 ${count}곳에 저장된 사진을 불러왔어요.`
       : '입면을 고르고 사진의 네 모서리를 지정하면 해당 벽면에 입혀요. 사진은 이 기기에 저장돼요.';
@@ -189,14 +203,20 @@ $('#model-context').addEventListener('change', e => viewer.setContext(e.target.c
 $('#model-draft').addEventListener('change', e => { viewer.setPoints(e.target.checked); viewer.setDraft(e.target.checked); });
 $('#model-heatmap').addEventListener('change', e => viewer.setHeatmap(e.target.checked));
 $('#remove-photo').addEventListener('click', async () => {
-  const siteId = S.site.site_id, id = S.face;
+  const siteId = photoSite().site_id, id = S.face;
   try { await removeFacade(siteId, id); }
   catch { $('#facade-status').textContent = '저장된 사진을 지우지 못했어요. 다시 시도해 주세요.'; return; }
-  if (S.site.site_id !== siteId) return;
+  if (photoSite()?.site_id !== siteId) return;
   delete S.textures[id]; delete S.cellsFrac[id];
-  viewer.setPhotos(S.textures); drawFaceList(); pickFace(id);
-  if (S.irr) $('#go-result').textContent = Object.keys(S.textures).length ? '데모 진단 결과 보기' : '사진 없이 데모 결과 보기';
-  $('#facade-status').textContent = `${labelFace(face())} 사진을 지웠어요.`;
+  viewer.setPhotos(S.textures); drawFaceList();
+  if (S.mode === 'research') {
+    $('#remove-photo').hidden = true;
+    $('#facade-status').textContent = `${photoFaceLabel()} 사진과 자동 판별 결과를 지웠어요.`;
+  } else {
+    pickFace(id);
+    if (S.irr) $('#go-result').textContent = Object.keys(S.textures).length ? '데모 진단 결과 보기' : '사진 없이 데모 결과 보기';
+    $('#facade-status').textContent = `${labelFace(face())} 사진을 지웠어요.`;
+  }
 });
 
 // Address lookup, credentials stay on the research PC.
@@ -307,6 +327,9 @@ async function loadResearchBuilding(buildingId, context = {}) {
     S.mode = 'research'; S.site = null; S.publicSite = context.publicSite || null; S.irr = null; S.face = null; S.researchBuilding = building;
     S.researchSensors = sensors; S.researchGroup = null; S.researchMonthly = null;
     S.researchAddress = context.address || null; S.analysisGrid = context.analysisGrid || null; S.candidatePrediction = null; ++researchMonthlyVersion;
+    S.cellsFrac = {}; S.textures = {};
+    if (S.publicSite) await restoreFacadePhotos(S.publicSite);
+    if (version !== researchVersion) return;
     const requestedRadius = Number(context.radiusM);
     const contextRadiusM = [100, 200, 300].includes(requestedRadius) ? requestedRadius : 200;
     viewer.setResearch({sensors, site: S.publicSite,
@@ -334,8 +357,9 @@ async function loadResearchBuilding(buildingId, context = {}) {
     viewer.setPoints(true); viewer.setDraft(candidateCount > 0);
     $('#model-heatmap').checked = false; $('#model-heatmap').disabled = true; viewer.setHeatmap(false);
     $('#model-front').disabled = true; $('#go-photo').disabled = true; $('#remove-photo').hidden = true;
-    $('#building-actions').hidden = true;
-    $('#go-result').disabled = true;
+    $('#building-actions').hidden = !S.publicSite;
+    $('#go-photo').hidden = false; $('#go-photo').textContent = '입면을 선택하면 사진을 분석할 수 있어요';
+    $('#go-result').hidden = true; $('#check-surrogate').hidden = true;
     $('#irradiance-grid').hidden = true;
     $('#research-monthly-panel').hidden = true;
     $('#surrogate-status').textContent = candidateCount
@@ -358,14 +382,25 @@ function drawResearchGroups() {
   $('#face-list').innerHTML = `<li><button data-research-group="" aria-controls="research-monthly-panel" aria-pressed="${S.researchGroup === null}">
     <span class="swatch research-all"></span><span>건물 전체 평균<span class="sub">지붕·입면 종합</span></span>
     <span class="val">${fmt(buildingMean)}<span class="sub">kWh/㎡·년</span></span></button></li>`
-    + groups.map(group => `<li><button data-research-group="${esc(group.surface_group_id)}" aria-controls="research-monthly-panel" aria-pressed="${S.researchGroup === group.surface_group_id}">
+    + groups.map(group => {
+      const mappedFace = researchPhotoFace(group), mask = mappedFace && S.cellsFrac[mappedFace.face_id];
+      const photoNote = mask ? ` · 창문·문 ${Math.round((1 - mean(mask)) * 100)}% 반영` : '';
+      return `<li><button data-research-group="${esc(group.surface_group_id)}" aria-controls="research-monthly-panel" aria-pressed="${S.researchGroup === group.surface_group_id}">
       <span class="swatch" style="background:${color(group.annual_prediction_mean, lo, hi)}"></span>
-      <span>${researchSurfaceLabel(group)}<span class="sub">방위 ${fmt(group.normal_azimuth_bin_deg)}° · 경사 ${fmt(group.normal_tilt_bin_deg)}°</span></span>
-      <span class="val">${fmt(group.annual_prediction_mean)}<span class="sub">kWh/㎡·년</span></span></button></li>`).join('');
+      <span>${researchSurfaceLabel(group)}<span class="sub">방위 ${fmt(group.normal_azimuth_bin_deg)}° · 경사 ${fmt(group.normal_tilt_bin_deg)}°${photoNote}</span></span>
+      <span class="val">${fmt(group.annual_prediction_mean)}<span class="sub">kWh/㎡·년</span></span></button></li>`;
+    }).join('');
   $('#face-list').querySelectorAll('[data-research-group]').forEach(button => button.addEventListener('click', () => {
     S.researchGroup = button.dataset.researchGroup || null;
     viewer.setResearchGroup(S.researchGroup); viewer.selectResearchSensor(null); drawResearchGroups();
     const selectedGroup = groups.find(group => group.surface_group_id === S.researchGroup);
+    const mappedFace = researchPhotoFace(selectedGroup);
+    S.face = mappedFace?.face_id || null;
+    $('#go-photo').disabled = !mappedFace;
+    $('#go-photo').textContent = mappedFace
+      ? `${researchSurfaceLabel(selectedGroup)} 사진 ${S.textures[mappedFace.face_id] ? '촬영·교체' : '촬영·선택'}`
+      : selectedGroup?.surface_type === 'Roof' ? '지붕 사진 분석은 지원하지 않아요' : '입면을 선택하면 사진을 분석할 수 있어요';
+    $('#remove-photo').hidden = !mappedFace || !S.textures[mappedFace.face_id];
     $('#facade-status').textContent = selectedGroup
       ? `${researchSurfaceLabel(selectedGroup)} · 연평균 ${fmt(selectedGroup.annual_prediction_mean)} kWh/㎡·년`
       : `건물 전체 평균 · ${fmt(buildingMean)} kWh/㎡·년`;
@@ -473,13 +508,12 @@ $('#building-search').addEventListener('submit', e => {
 });
 
 // ---------- 2. 입면 사진 ----------
-const face = () => S.site.faces.find(f => f.face_id === S.face);
 const CORNERS = ['왼쪽 위', '오른쪽 위', '오른쪽 아래', '왼쪽 아래'];
 
 function openPhoto() {
   const f = face();
-  $('#photo-title').textContent = `${labelFace(f)} 사진`;
-  $('#photo-hint').textContent = `건물 밖에서 ${labelFace(f)}을 정면으로 보고, 벽 전체가 들어오게 찍어 주세요.`;
+  $('#photo-title').textContent = `${photoFaceLabel()} 사진`;
+  $('#photo-hint').textContent = `건물 밖에서 ${photoFaceLabel()}을 정면으로 보고, 벽 전체가 들어오게 찍어 주세요.`;
   S.img = null; S.rectImg = null; S.corners = [];
   S.cells = S.cellsFrac[S.face] ? [...S.cellsFrac[S.face]] : null;
   $('#corner-box').hidden = true;
@@ -597,8 +631,14 @@ function rectify() {
     out.data[o] = src.data[i]; out.data[o + 1] = src.data[i + 1]; out.data[o + 2] = src.data[i + 2]; out.data[o + 3] = 255;
   }
   S.rectImg = out;
-  // shortcut: 분할 모델이 없어 모든 칸을 벽으로 시작한다. CNN이 붙으면 여기서 칸별 벽 비율을 채운다
-  S.cells ??= Array(f.ns * f.nt).fill(1);
+  if (!S.cells) {
+    const proposal = analyzeFacadeOpenings(out, f.ns, f.nt);
+    S.cells = proposal.cells;
+    const candidates = proposal.windowCount + proposal.doorCount;
+    $('#photo-hint').textContent = candidates || proposal.uncertainCount
+      ? `자동 판별 완료: 창문·문 후보 ${candidates}칸, 확인 필요 ${proposal.uncertainCount}칸. 격자를 눌러 수정해 주세요.`
+      : '자동 판별에서 뚜렷한 창문·문 후보를 찾지 못했어요. 격자를 눌러 직접 제외할 수 있어요.';
+  }
   $('#grid-box').hidden = false;
   $('#photo-done').disabled = false;
   drawGrid();
@@ -620,7 +660,7 @@ function drawGrid() {
     if (v < 1) { g.fillStyle = 'rgba(24,48,42,.6)'; g.fillRect(x + cw * v, y, cw * (1 - v), ch); }
     g.strokeStyle = 'rgba(255,255,255,.85)'; g.lineWidth = 1; g.strokeRect(x + .5, y + .5, cw - 1, ch - 1);
   }
-  $('#open-ratio').textContent = `이 면의 창·간판 비율 ${Math.round((1 - mean(S.cells)) * 100)}% · 칸 하나 ${fmt(f.width_m / f.ns, 1)} × ${fmt(f.height_m / f.nt, 1)}m`;
+  $('#open-ratio').textContent = `자동 판별·보정된 창문·문 비율 ${Math.round((1 - mean(S.cells)) * 100)}% · 칸 하나 ${fmt(f.width_m / f.ns, 1)} × ${fmt(f.height_m / f.nt, 1)}m`;
 }
 
 $('#rect-canvas').addEventListener('click', e => {
@@ -634,7 +674,7 @@ $('#rect-canvas').addEventListener('click', e => {
 
 $('#photo-done').addEventListener('click', async () => {
   if (!S.rectImg || !S.cells) return;
-  const button = $('#photo-done'), siteId = S.site.site_id, faceId = S.face;
+  const button = $('#photo-done'), siteId = photoSite().site_id, faceId = S.face;
   button.disabled = true;
   try {
     // Use the clean rectified photo, not the yellow installation-mask overlay.
@@ -645,9 +685,14 @@ $('#photo-done').addEventListener('click', async () => {
     S.cellsFrac[faceId] = cells; S.textures[faceId] = {image, dataUrl};
     let saved = true;
     try { await saveFacade(siteId, faceId, {dataUrl, cells}); } catch { saved = false; }
-    viewer.setPhotos(S.textures); drawFaceList(); pickFace(faceId);
+    viewer.setPhotos(S.textures); drawFaceList();
+    if (S.mode !== 'research') pickFace(faceId);
+    else {
+      $('#remove-photo').hidden = false;
+      $('#facade-status').textContent = `${photoFaceLabel()}의 창문·문 후보를 자동 판별해 저장했어요.`;
+    }
     if (S.irr) $('#go-result').textContent = '데모 진단 결과 보기';
-    $('#facade-status').textContent = saved ? `${labelFace(face())}에 사진을 입혔어요. 이 기기의 브라우저에 저장했어요.`
+    if (S.mode !== 'research') $('#facade-status').textContent = saved ? `${labelFace(face())}에 사진을 입혔어요. 이 기기의 브라우저에 저장했어요.`
       : '사진을 입혔지만 브라우저에 저장하지 못했어요. 새로고침하면 사진이 사라질 수 있어요.';
     show('site'); viewer.faceFront();
     $('#building-canvas').scrollIntoView({block: 'center', behavior: 'instant'});
